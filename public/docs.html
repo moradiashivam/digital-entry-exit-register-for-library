@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation &amp; installation — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Installation guide, requirements, configuration and troubleshooting for the multi-university library entry and exit register with palm vein, RFID and manual check-in." />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="site">
+  <header class="s-nav">
+    <div class="s-wrap">
+      <a class="s-logo" href="/"><span class="mark">LR</span><span data-site-brand>Library Entry &amp; Exit Register</span></a>
+      <nav class="s-links">
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+        <a href="/docs.html">Documentation</a>
+        <a href="/developer.html">Developer</a>
+        <a href="/contact.html">Contact us</a>
+        <a class="s-btn" href="/login">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="page">
+    <div id="customSlot">
+      <section class="s-wrap s-section">
+        <h2>Documentation &amp; installation</h2>
+        <p class="sub">Everything needed to install the register on a campus server, connect the palm kiosk and run day-to-day operations.</p>
+
+        <div class="doc-layout">
+          <aside class="doc-toc">
+            <a href="#requirements">Requirements</a>
+            <a href="#windows">Install on Windows</a>
+            <a href="#linux">Install on Linux / macOS</a>
+            <a href="#env">Configuration (.env)</a>
+            <a href="#kiosk">Kiosk &amp; palm bridge</a>
+            <a href="#owner">Owner workflow</a>
+            <a href="#admin">University admin workflow</a>
+            <a href="#backup">Backups &amp; upgrades</a>
+            <a href="#trouble">Troubleshooting</a>
+            <a href="#stack">Technology stack</a>
+          </aside>
+
+          <article class="doc-body">
+            <h3 id="requirements">Requirements</h3>
+            <ul>
+              <li>MySQL 8 or MariaDB 10.5+ (XAMPP works for pilots)</li>
+              <li>Node.js 18 or newer</li>
+              <li>A server or PC on the campus LAN, reachable on port 4000</li>
+              <li>For palm scanning: a Windows kiosk PC with the vendor palm SDK and the C++ bridge</li>
+            </ul>
+
+            <h3 id="windows">Install on Windows</h3>
+            <ol>
+              <li>Copy the <code>mysql-app</code> folder to the server machine and start MySQL.</li>
+              <li>Run <code>setup.bat</code> once — it creates <code>.env</code>.</li>
+              <li>Edit <code>.env</code> with your database credentials and owner login.</li>
+              <li>Run <code>setup.bat</code> again — it creates the database, tables and owner account.</li>
+              <li>Run <code>start.bat</code> and open <code>http://localhost:4000/</code>.</li>
+            </ol>
+            <p class="note">Allow Node.js through the Windows firewall so other machines can reach <code>http://&lt;server-ip&gt;:4000</code>.</p>
+
+            <h3 id="linux">Install on Linux / macOS</h3>
+            <pre><code>cd mysql-app
+cp .env.example .env    # then edit it
+npm install
+npm run setup
+npm start</code></pre>
+            <p class="note">A single consolidated schema lives in <code>mysql-app/db/database.sql</code> and is safe to re-run.</p>
+
+            <h3 id="env">Configuration (.env)</h3>
+            <table>
+              <thead><tr><th>Key</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>DB_HOST</code> / <code>DB_USER</code> / <code>DB_PASSWORD</code> / <code>DB_NAME</code></td><td>MySQL connection</td></tr>
+                <tr><td><code>OWNER_EMAIL</code> / <code>OWNER_PASSWORD</code></td><td>Platform owner account created at setup</td></tr>
+                <tr><td><code>JWT_SECRET</code></td><td>Long random string; also encrypts stored SMTP credentials</td></tr>
+                <tr><td><code>PORT</code></td><td>HTTP port, default 4000</td></tr>
+              </tbody>
+            </table>
+
+            <h3 id="kiosk">Kiosk &amp; palm bridge</h3>
+            <ol>
+              <li>Each university gets a kiosk URL: <code>http://&lt;server&gt;:4000/kiosk/&lt;slug&gt;</code>.</li>
+              <li>Open it full-screen on the gate PC. Palm, RFID and manual entry are available as tabs.</li>
+              <li>For palm vein, build the C++ bridge on the kiosk PC with the vendor SDK. Templates are matched locally and never leave that machine.</li>
+              <li>The bridge posts the matched member code to <code>POST /api/public/scan-event</code> using the university's kiosk key.</li>
+              <li>Rotating the kiosk key in the owner console invalidates the old key immediately — update every bridge.</li>
+            </ol>
+
+            <h3 id="owner">Owner workflow</h3>
+            <ol>
+              <li>Sign in at <code>/login</code> with the owner account.</li>
+              <li><b>Provision access</b> — create the university, its kiosk slug and subscription window, then issue the first admin login.</li>
+              <li><b>Plans</b> and <b>Payments</b> — packages, member limits, invoices, collections and dues.</li>
+              <li><b>Leads (CRM)</b> — enquiries from the public contact form arrive here and can be converted into a university.</li>
+              <li><b>Website</b> — brand the public pages, or replace the home and contact pages with your own HTML/CSS.</li>
+              <li>The owner console is a business console: it cannot open any campus's members, scans or reports.</li>
+            </ol>
+
+            <h3 id="admin">University admin workflow</h3>
+            <ol>
+              <li>Add members manually or bulk-import from Excel/CSV; maintain courses, departments and years under <b>Master data</b>.</li>
+              <li>Enrol palm templates or RFID cards per member, and upload photos for on-screen verification.</li>
+              <li>Watch live occupancy on the dashboard; footfall by hour, department and gender.</li>
+              <li>Use <b>Reports</b> with the calendar, pick the columns you want, then print or export to Excel, CSV or PDF.</li>
+              <li>Customise the kiosk with the university name, logo and colours under <b>Settings</b>.</li>
+            </ol>
+
+            <h3 id="backup">Backups &amp; upgrades</h3>
+            <pre><code>mysqldump -u root -p library_register &gt; backup-YYYYMMDD.sql
+mysql -u root -p library_register &lt; backup-YYYYMMDD.sql</code></pre>
+            <p>To upgrade: back up, copy the new files, run <code>npm install</code> and restart. New tables and columns are applied automatically on boot.</p>
+
+            <h3 id="trouble">Troubleshooting</h3>
+            <table>
+              <thead><tr><th>Symptom</th><th>Fix</th></tr></thead>
+              <tbody>
+                <tr><td>Admin cannot sign in</td><td>Check the account is Active and the subscription is current; reset the password from the owner console</td></tr>
+                <tr><td>Kiosk says "not allowed"</td><td>Subscription expired or the university is suspended</td></tr>
+                <tr><td>Bridge gets 401</td><td>The kiosk key was rotated — update <code>KIOSK_KEY</code> on the kiosk PC</td></tr>
+                <tr><td>No emails</td><td>Check SMTP host, port and credentials in System settings</td></tr>
+                <tr><td>Server won't start</td><td>MySQL not running, or wrong <code>DB_PASSWORD</code> in <code>.env</code></td></tr>
+              </tbody>
+            </table>
+
+            <h3 id="stack">Technology stack</h3>
+            <table>
+              <thead><tr><th>Layer</th><th>Technology</th></tr></thead>
+              <tbody>
+                <tr><td>Runtime</td><td>Node.js 18+ (ES modules)</td></tr>
+                <tr><td>API</td><td>Express 4 + CORS</td></tr>
+                <tr><td>Database</td><td>MySQL 8 / MariaDB 10.5+ via <code>mysql2</code> pool</td></tr>
+                <tr><td>Auth</td><td>JWT bearer tokens, bcrypt password hashes</td></tr>
+                <tr><td>Email</td><td>Nodemailer over your own SMTP</td></tr>
+                <tr><td>Frontend</td><td>Plain HTML/CSS/ES-module JS — no build step</td></tr>
+                <tr><td>Palm hardware</td><td>C++ bridge on the kiosk PC using the vendor SDK</td></tr>
+              </tbody>
+            </table>
+          </article>
+        </div>
+      </section>
+
+      <section class="s-section">
+        <div class="s-wrap">
+          <div class="s-cta-band">
+            <div>
+              <h2 style="margin:0">Need help installing?</h2>
+              <p class="note" style="margin:.3rem 0 0">Our team can set up the server, kiosk and first import with you.</p>
+            </div>
+            <a class="s-btn" href="/contact.html">Contact us</a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="s-foot">
+    <div class="s-wrap">
+      <span>© <span id="yr"></span> <span data-site-brand>Library Entry &amp; Exit Register</span></span>
+      <span><a href="/">Home</a> · <a href="/contact.html">Contact</a> · <a href="/developer.html">Developer</a> · <a href="/login">Staff sign in</a></span>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { loadSite } from "/app/site.js";
+    document.getElementById("yr").textContent = new Date().getFullYear();
+    await loadSite("docs");
+  </script>
+</body>
+</html>

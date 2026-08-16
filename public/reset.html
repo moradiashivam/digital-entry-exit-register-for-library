@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Set a new password — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Choose a new password for your Library Entry & Exit Register account." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
+  <main class="login-wrap">
+    <section class="panel login-card">
+      <h1>Set a new password</h1>
+      <p class="muted">Choose a password of at least 8 characters.</p>
+      <form id="form" style="margin-top:1rem">
+        <label for="pw">New password</label>
+        <input id="pw" type="password" autocomplete="new-password" minlength="8" required style="width:100%" />
+        <label for="pw2">Repeat password</label>
+        <input id="pw2" type="password" autocomplete="new-password" minlength="8" required style="width:100%" />
+        <button type="submit" id="submit" style="width:100%;margin-top:1rem">Save password</button>
+        <p id="msg" class="muted"></p>
+      </form>
+      <p class="muted" style="margin-top:1rem"><a href="/login">Back to sign in</a></p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api } from "/app/api.js";
+    const token = new URLSearchParams(location.search).get("token") || "";
+    const msg = document.getElementById("msg");
+    if (!token) {
+      msg.style.color = "var(--danger)";
+      msg.textContent = "This reset link is incomplete — request a new one.";
+    }
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      msg.style.color = "";
+      msg.textContent = "";
+      const pw = document.getElementById("pw").value;
+      if (pw !== document.getElementById("pw2").value) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = "The two passwords do not match.";
+        return;
+      }
+      document.getElementById("submit").disabled = true;
+      try {
+        await api("/api/auth/reset-password", { method: "POST", body: { token, password: pw } });
+        msg.textContent = "Password updated — taking you to sign in…";
+        setTimeout(() => (location.href = "/login"), 1200);
+      } catch (err) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = err.message;
+      } finally {
+        document.getElementById("submit").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

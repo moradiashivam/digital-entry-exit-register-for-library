@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forgot password — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Request a password reset link for your Library Entry & Exit Register account." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
+  <main class="login-wrap">
+    <section class="panel login-card">
+      <h1>Forgot your password?</h1>
+      <p class="muted">Enter your registered email and we will send you a reset link valid for 45 minutes.</p>
+      <form id="form" style="margin-top:1rem">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" required style="width:100%" />
+        <button type="submit" id="submit" style="width:100%;margin-top:1rem">Send reset link</button>
+        <p id="msg" class="muted"></p>
+      </form>
+      <p class="muted" style="margin-top:1rem"><a href="/login">Back to sign in</a></p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api } from "/app/api.js";
+    const msg = document.getElementById("msg");
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      msg.textContent = "";
+      msg.style.color = "";
+      document.getElementById("submit").disabled = true;
+      try {
+        const out = await api("/api/auth/forgot-password", {
+          method: "POST",
+          body: { email: document.getElementById("email").value },
+        });
+        msg.textContent = out.message || "If that email is registered, a reset link is on its way.";
+      } catch (err) {
+        msg.style.color = "var(--danger)";
+        msg.textContent = err.message;
+      } finally {
+        document.getElementById("submit").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

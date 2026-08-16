@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Developer information — Library Entry & Exit Register</title>
+  <meta name="description" content="Meet the developer and guide behind the Library Entry & Exit Register — Shivam Moradia, with guidance from Prof. Dr. Meghna Vyas." />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="site">
+  <header class="s-nav">
+    <div class="s-wrap">
+      <a class="s-logo" href="/"><span class="mark">LR</span><span data-site-brand>Library Entry & Exit Register</span></a>
+      <nav class="s-links">
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+        <a href="/docs.html">Documentation</a>
+        <a href="/developer.html">Developer</a>
+        <a href="/contact.html">Contact us</a>
+        <a class="s-btn" href="/login">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="page">
+    <div id="customSlot">
+      <section class="s-wrap s-section">
+        <h2>Developer information</h2>
+        <p class="sub">The people who designed, built and guided the Library Entry & Exit Register.</p>
+
+        <div class="dev-grid">
+          <article class="dev-card">
+            <div class="dev-avatar">SM</div>
+            <div class="dev-role">Developer</div>
+            <h3>Shivam Moradia</h3>
+
+            <div class="dev-aff">
+              <p><b>Technical Assistant Library</b><br>
+              Knowledge Resource Centre (Central Library)<br>
+              Saurashtra University, Rajkot</p>
+              <p class="dev-sep">&</p>
+              <p><b>Research Student</b><br>
+              PG Department of Library and Information Science<br>
+              Sardar Patel University, Vallabhvidhyanagar</p>
+            </div>
+          </article>
+
+          <article class="dev-card dev-card-guide">
+            <div class="dev-avatar">MV</div>
+            <div class="dev-role">Guidance given by</div>
+            <h3>Prof. Dr. Meghna Vyas</h3>
+
+            <div class="dev-aff">
+              <p><b>PG Department of Library and Information Science</b><br>
+              Sardar Patel University, Vallabhvidhyanagar</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="s-section">
+        <div class="s-wrap">
+          <div class="s-cta-band">
+            <div>
+              <h2 style="margin:0">Want this system for your library?</h2>
+              <p class="note" style="margin:.3rem 0 0">Reach out and we'll set up a walkthrough for your campus.</p>
+            </div>
+            <a class="s-btn" href="/contact.html">Contact us</a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="s-foot">
+    <div class="s-wrap">
+      <span>© <span id="yr"></span> <span data-site-brand>Library Entry & Exit Register</span></span>
+      <span><a href="/">Home</a> · <a href="/docs.html">Docs</a> · <a href="/developer.html">Developer</a> · <a href="/login">Staff sign in</a></span>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { loadSite } from "/app/site.js";
+    document.getElementById("yr").textContent = new Date().getFullYear();
+    await loadSite("developer");
+  </script>
+</body>
+</html>

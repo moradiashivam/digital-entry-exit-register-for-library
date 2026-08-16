@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Library Entry Kiosk</title>
+  <meta name="description" content="Self-service library entry and exit kiosk with palm, RFID card and manual code check-in." />
+  <link rel="stylesheet" href="/styles.css" />
+  <style id="kioskCustomCss"></style>
+</head>
+<body>
+  <main class="kiosk" id="kioskRoot">
+    <section class="panel kiosk-card" id="kioskCard">
+      <img id="logo" class="logo kiosk-logo" alt="University logo" hidden />
+      <h1 id="institution" class="kiosk-institution">Library</h1>
+      <p class="muted kiosk-title" id="title"></p>
+      <div class="clock kiosk-clock" id="clock"></div>
+      <p id="welcome" class="kiosk-welcome"></p>
+
+      <div class="tabs kiosk-tabs" id="tabs"></div>
+
+      <form id="scanForm" class="row kiosk-form">
+        <input id="code" class="kiosk-input" placeholder="Scan card or type member code" autocomplete="off" />
+        <button type="submit">Check in / out</button>
+      </form>
+
+      <div id="result" class="kiosk-result"></div>
+      <p class="muted kiosk-footer" id="footer"></p>
+    </section>
+  </main>
+  <script type="module" src="/app/kiosk.js"></script>
+</body>
+</html>

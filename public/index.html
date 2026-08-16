@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Library Entry &amp; Exit Register — Palm vein attendance for universities</title>
+  <meta name="description" content="Multi-university digital entry and exit register with palm vein, RFID and manual check-in, live occupancy, member management and exportable reports." />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="site">
+  <header class="s-nav">
+    <div class="s-wrap">
+      <a class="s-logo" href="/"><span class="mark">LR</span><span data-site-brand>Library Entry &amp; Exit Register</span></a>
+      <nav class="s-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="/docs.html">Documentation</a>
+        <a href="/developer.html">Developer</a>
+        <a href="/contact.html">Contact us</a>
+        <a class="s-btn" href="/login">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="page">
+    <div id="customSlot">
+      <section class="s-wrap s-hero">
+        <div>
+          <span class="s-badge"><span class="pulse"></span> Live occupancy · Palm vein · RFID · Manual</span>
+          <h1>The digital <em>entry &amp; exit register</em> your library actually enjoys using</h1>
+          <p class="lead" data-site-tagline>
+            One platform for every campus: members scan their palm at the door, occupancy updates instantly,
+            and your reports are ready to export before the queue clears.
+          </p>
+          <div class="s-cta">
+            <a class="s-btn" href="/contact.html">Request a demo</a>
+            <a class="s-btn ghost" href="/login">University sign in</a>
+          </div>
+          <div class="s-stats">
+            <div><b>&lt; 1s</b><span>Average scan to log</span></div>
+            <div><b>3 modes</b><span>Palm, RFID, manual</span></div>
+            <div><b>Multi-campus</b><span>Isolated per university</span></div>
+          </div>
+        </div>
+
+        <div class="stage">
+          <div class="card3d">
+            <div class="pane lift-1">
+              <h4><span class="pulse"></span> Inside right now — 128 readers</h4>
+              <p>Live headcount, average stay 47 min, peak at 11:00.</p>
+            </div>
+            <div class="pane lift-3">
+              <h4>Palm verified · Ananya Sharma</h4>
+              <p>B.Com · 2nd year · Entry recorded 10:24 AM</p>
+            </div>
+            <div class="pane lift-2">
+              <h4>Today's register</h4>
+              <p>412 entries · 384 exits · 0 failed scans</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="s-section" id="features">
+        <div class="s-wrap">
+          <h2>Everything the register needs, nothing it doesn't</h2>
+          <p class="sub">Built for university libraries running thousands of check-ins a day across multiple gates.</p>
+          <div class="s-grid">
+            <article class="tile"><div class="ico">🖐️</div><h3>Palm vein kiosk</h3><p>Contactless identification through the on-site bridge; entry and exit toggle automatically.</p></article>
+            <article class="tile"><div class="ico">💳</div><h3>RFID &amp; manual</h3><p>Card tap or member code fallback, with the student photo shown on screen for verification.</p></article>
+            <article class="tile"><div class="ico">📊</div><h3>Live dashboard</h3><p>Who is inside, hourly footfall, department and gender trends, updated as scans happen.</p></article>
+            <article class="tile"><div class="ico">📥</div><h3>Bulk import</h3><p>Excel or CSV member upload with row-by-row validation and masters for course, department and year.</p></article>
+            <article class="tile"><div class="ico">🗓️</div><h3>Calendar reports</h3><p>Pick any date, choose the columns you want, then print or export to Excel, CSV or PDF.</p></article>
+            <article class="tile"><div class="ico">🏛️</div><h3>Multi-university</h3><p>Every campus gets its own kiosk link, branding and data boundary, managed by the platform owner.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="s-section" id="how">
+        <div class="s-wrap">
+          <h2>How a scan becomes a record</h2>
+          <p class="sub">The kiosk talks to your local palm bridge, the server writes the register, the dashboard updates.</p>
+          <div class="cube-stage">
+            <div class="cube">
+              <div class="f1">Scan palm<br>at the gate</div>
+              <div class="f2">Bridge matches<br>the template</div>
+              <div class="f3">Server logs<br>entry or exit</div>
+              <div class="f4">Occupancy<br>updates live</div>
+              <div class="f5">Reports<br>export ready</div>
+              <div class="f6">Audit trail<br>kept forever</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="s-section">
+        <div class="s-wrap">
+          <div class="s-cta-band">
+            <div>
+              <h2 style="margin:0">Bring it to your campus</h2>
+              <p class="note" style="margin:.3rem 0 0">Tell us about your library and we'll set up a walkthrough.</p>
+            </div>
+            <a class="s-btn" href="/contact.html">Contact us</a>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="s-foot">
+    <div class="s-wrap">
+      <span>© <span id="yr"></span> <span data-site-brand>Library Entry &amp; Exit Register</span></span>
+      <span><a href="/docs.html">Docs</a> · <a href="/developer.html">Developer</a> · <a href="/contact.html">Contact</a> · <a href="/login">Staff sign in</a></span>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { loadSite, initTilt } from "/app/site.js";
+    document.getElementById("yr").textContent = new Date().getFullYear();
+    await loadSite("home");
+    initTilt();
+  </script>
+</body>
+</html>

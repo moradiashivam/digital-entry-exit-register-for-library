@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Sign in to manage members, kiosks and entry/exit reports for your university library." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
+  <main class="login-wrap">
+    <section class="panel login-card">
+      <h1>Library Entry &amp; Exit Register</h1>
+      <p class="muted">Sign in with the credentials issued by your platform owner.</p>
+      <form id="form" style="margin-top:1rem">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" required style="width:100%" />
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required style="width:100%" />
+        <button type="submit" style="width:100%;margin-top:1rem" id="submit">Sign in</button>
+        <p id="error" class="muted" style="color:var(--danger)"></p>
+        <p class="muted" style="margin-top:.4rem"><a href="/forgot.html">Forgot your password?</a></p>
+      </form>
+      <p class="muted" style="margin-top:1rem">Kiosk screen? Open <code>/kiosk/&lt;university-link&gt;</code>.</p>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, setToken } from "/app/api.js";
+
+    if (localStorage.getItem("ler_token")) location.href = "/admin";
+
+    const form = document.getElementById("form");
+    const error = document.getElementById("error");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      error.textContent = "";
+      document.getElementById("submit").disabled = true;
+      try {
+        const out = await api("/api/auth/login", {
+          method: "POST",
+          body: {
+            email: document.getElementById("email").value,
+            password: document.getElementById("password").value,
+          },
+        });
+        setToken(out.token);
+        location.href = "/admin";
+      } catch (err) {
+        error.textContent = err.message;
+      } finally {
+        document.getElementById("submit").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

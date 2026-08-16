@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Contact us — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Talk to us about bringing the palm vein library entry and exit register to your university. Enquiries reach our sales team instantly." />
+  <link rel="stylesheet" href="/site.css" />
+</head>
+<body class="site">
+  <header class="s-nav">
+    <div class="s-wrap">
+      <a class="s-logo" href="/"><span class="mark">LR</span><span data-site-brand>Library Entry &amp; Exit Register</span></a>
+      <nav class="s-links">
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+        <a href="/docs.html">Documentation</a>
+        <a href="/developer.html">Developer</a>
+        <a class="s-btn ghost" href="/login">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="page">
+    <div id="customSlot">
+      <section class="s-wrap s-section">
+        <h2>Talk to us about your library</h2>
+        <p class="sub">Send this form and your enquiry lands directly in our sales pipeline — we usually reply within one working day.</p>
+
+        <div class="contact-grid">
+          <form class="form-card" id="contactForm">
+            <div class="field-row">
+              <div>
+                <label for="c_name">University / institute *</label>
+                <input id="c_name" name="name" required maxlength="200" />
+              </div>
+              <div>
+                <label for="c_person">Your name</label>
+                <input id="c_person" name="contact_person" maxlength="150" />
+              </div>
+            </div>
+            <div class="field-row">
+              <div>
+                <label for="c_email">Email *</label>
+                <input id="c_email" name="email" type="email" required maxlength="200" />
+              </div>
+              <div>
+                <label for="c_phone">Phone</label>
+                <input id="c_phone" name="phone" maxlength="40" />
+              </div>
+            </div>
+            <div class="field-row">
+              <div>
+                <label for="c_city">City</label>
+                <input id="c_city" name="city" maxlength="120" />
+              </div>
+              <div>
+                <label for="c_size">Approx. members</label>
+                <select id="c_size" name="size">
+                  <option value="">Select</option>
+                  <option>Under 1,000</option>
+                  <option>1,000 – 5,000</option>
+                  <option>5,000 – 20,000</option>
+                  <option>Over 20,000</option>
+                </select>
+              </div>
+            </div>
+            <label for="c_msg">How can we help?</label>
+            <textarea id="c_msg" name="message" rows="4" maxlength="2000" placeholder="Number of gates, existing ID cards, preferred timeline…"></textarea>
+            <div style="display:flex;align-items:center;gap:.9rem;margin-top:1.1rem;flex-wrap:wrap">
+              <button class="s-btn" type="submit" id="send">Send enquiry</button>
+              <span class="note" id="status" role="status" aria-live="polite"></span>
+            </div>
+          </form>
+
+          <aside>
+            <div class="form-card">
+              <h3 style="margin-top:0">Direct contact</h3>
+              <p class="note">Email <a data-site-email href="#">sales@example.com</a></p>
+              <p class="note">Phone <a data-site-phone href="#">—</a></p>
+              <p class="note" data-site-address></p>
+            </div>
+            <div class="form-card" style="margin-top:1rem">
+              <h3 style="margin-top:0">Already a customer?</h3>
+              <p class="note">University staff sign in to the admin panel; kiosks open at <code>/kiosk/&lt;university-link&gt;</code>.</p>
+              <a class="s-btn ghost" href="/login">Staff sign in</a>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="s-foot">
+    <div class="s-wrap">
+      <span>© <span id="yr"></span> <span data-site-brand>Library Entry &amp; Exit Register</span></span>
+      <span><a href="/">Home</a> · <a href="/docs.html">Docs</a> · <a href="/developer.html">Developer</a> · <a href="/login">Staff sign in</a></span>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { loadSite } from "/app/site.js";
+    document.getElementById("yr").textContent = new Date().getFullYear();
+    await loadSite("contact");
+
+    const form = document.getElementById("contactForm");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const status = document.getElementById("status");
+        const btn = document.getElementById("send");
+        status.textContent = "Sending…";
+        status.className = "note";
+        btn.disabled = true;
+        try {
+          const body = Object.fromEntries(new FormData(form).entries());
+          const res = await fetch("/api/public/contact", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const out = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(out.error || "Could not send your enquiry");
+          status.textContent = "Thank you — our team has your enquiry.";
+          status.className = "note ok";
+          form.reset();
+        } catch (err) {
+          status.textContent = err.message;
+          status.className = "note bad";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+  </script>
+</body>
+</html>
