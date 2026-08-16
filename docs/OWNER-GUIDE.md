@@ -1,113 +1,20 @@
-# Platform Owner Guide
+# Library Register — Palm Scan Attendance Platform
 
-The same content is available inside the app under **Documentation** in the owner sidebar.
+A multi-tenant (multi-university) library attendance and management platform with palm-biometric
+kiosk scanning, a business/owner console for provisioning and billing, and per-campus admin
+consoles for members, reports, and settings.
 
-## 1. Signing in
+## Overview
 
-The owner account is created by `setup.bat` / `npm run setup` from `OWNER_EMAIL` and
-`OWNER_PASSWORD` in `.env`. Sign in at `http://<server>:4000/`.
+- **Owner console** — platform-level business operations: universities, plans, payments,
+  invoicing, leads (CRM), and system settings. The owner has no access to any university's
+  members, scan logs, or reports — that data is isolated per campus.
+- **University admin console** — per-campus member management, scan reports, and settings.
+- **Kiosk** — a browser page paired with a C++ bridge on the kiosk PC that talks to the palm
+  scanner SDK. Biometric templates never leave the kiosk PC; only a matched member code is sent
+  to the server.
 
-The owner console is a business console. By design it cannot open any university's members,
-scan logs or reports — that data belongs to the campus.
-
-| Page | Purpose |
-|---|---|
-| Platform overview | Revenue, active/expiring subscriptions, tenant growth |
-| Universities | Subscription window, plan, status (Active / Suspended) |
-| Plans | Packages, member limits, pricing |
-| Payments & accounting | Invoices, collections, dues, tax |
-| Leads (CRM) | Enquiries, follow-ups, conversion |
-| Provision access | Create universities and issue admin logins |
-| System settings | Company details, invoice numbering, SMTP, audit |
-
-## 2. Creating a university
-
-1. **Provision access** → enter the university name and a kiosk slug (lower-case, no spaces).
-   The kiosk URL becomes `http://<server>:4000/kiosk/<slug>`.
-2. Set subscription start and end dates → **Create university**.
-3. **Admin logins** on that row → issue the first super-admin email and password.
-4. Share the kiosk URL, and the **kiosk key** if an external palm bridge is used.
-
-**Rotate** replaces the kiosk key immediately (update every bridge). **Reset** sets a new
-password for a university admin.
-
-## 3. Subscriptions
-
-Outside the start/end window the university admin sees a "Subscription expired" screen and the
-kiosk stops accepting scans. Extend the dates in **Universities**, or record a payment which
-renews the period. Status *Suspended* blocks access regardless of dates. A nightly job flags
-soon-to-expire subscriptions and emails the contact when SMTP is configured.
-
-## 4. Plans, payments, invoices
-
-Create packages in **Plans** (name, price, billing period, member limit) and assign them per
-university. Record payments in **Payments & accounting** (amount, tax, mode, reference, period);
-the page totals collections and dues and prints an invoice using the company profile and invoice
-prefix from **System settings**.
-
-## 5. Leads
-
-**Leads (CRM)** stores enquiries with stage and follow-up notes. **Convert** creates the
-university, carries the contact details over and opens provisioning in one flow.
-
-## 6. System settings, email, backups
-
-SMTP credentials are stored encrypted (AES-256-GCM) with a key derived from `JWT_SECRET`;
-changing that secret invalidates stored credentials and all sessions.
-
-```bash
-mysqldump -u root -p library_register > backup-YYYYMMDD.sql
-mysql -u root -p library_register < backup-YYYYMMDD.sql
-```
-
-## 7. Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| Admin cannot sign in | Account Active? Subscription current? Use **Reset** |
-| Kiosk "not allowed" | Subscription expired or status Suspended |
-| Bridge gets 401 | Kiosk key rotated — update `KIOSK_KEY` on the kiosk PC |
-| No emails | Check SMTP host/port/credentials in System settings |
-| Server won't start | MySQL not running, or wrong `DB_PASSWORD` in `.env` |
-
-## 8. Installation
-
-**Requirements:** MySQL 8 / MariaDB 10.5+ and Node.js 18+.
-
-### Windows
-
-1. Copy the `mysql-app` folder to the server machine and start MySQL.
-2. Run `setup.bat` once — it creates `.env`.
-3. Edit `.env`: `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OWNER_EMAIL`, `OWNER_PASSWORD`,
-   `JWT_SECRET` (long random string; also encrypts SMTP credentials), `PORT` (default 4000).
-4. Run `setup.bat` again — creates the database, tables and owner account.
-5. Run `start.bat` and open `http://localhost:4000/`.
-
-### Linux / macOS
-
-```bash
-cd mysql-app
-cp .env.example .env    # then edit it
-npm install
-npm run setup
-npm start
-```
-
-### Fresh schema in one file
-
-`mysql-app/db/database.sql` contains every table with no follow-up migrations; safe to re-run.
-
-### Production
-
-Keep MySQL on `127.0.0.1`, put the app behind Nginx/Caddy with HTTPS, and keep `npm start`
-alive with pm2, systemd or NSSM. On Windows allow Node.js through the firewall so LAN clients
-can reach `http://<server-ip>:4000`.
-
-### Upgrading
-
-Back up, copy new files, `npm install`, restart — new tables and columns apply automatically on boot.
-
-## 9. Technology stack
+## Technology Stack
 
 | Layer | Technology |
 |---|---|
@@ -116,7 +23,7 @@ Back up, copy new files, `npm install`, restart — new tables and columns apply
 | Database | MySQL 8 / MariaDB 10.5+ via `mysql2` pool |
 | Auth | JWT bearer tokens, bcrypt password hashes |
 | Email | Nodemailer over your own SMTP |
-| Encryption | AES-256-GCM for SMTP credentials (key from `JWT_SECRET`) |
+| Encryption | AES-256-GCM for SMTP credentials (key derived from `JWT_SECRET`) |
 | Frontend | Plain HTML/CSS/ES-module JS — no build step |
 | Palm hardware | C++ bridge on the kiosk PC using the vendor SDK |
 
@@ -126,21 +33,40 @@ Browser kiosk page ──────────────┼─> Node/Expres
 Admin console (browser) ─────────┘
 ```
 
-Biometric templates never leave the kiosk PC; the bridge matches locally and posts the member
-code to `POST /api/public/scan-event` with the university's kiosk key.
+## Installation
 
-### Folder map
+Full installation and setup instructions (Windows and Linux/macOS, environment variables,
+database setup, production deployment, and upgrading) are documented separately here:
 
-- `src/server.js` — bootstrap and static hosting
-- `src/routes/` — auth, members, masters, reports, settings, owner, public scan API
-- `src/db.js` — pool plus automatic schema upgrades on start
-- `db/` — `schema.sql`, `platform.sql`, consolidated `database.sql`
-- `public/` — admin console, kiosk, login/reset pages
-- `docs/` — these guides
+**📄 [`/docs/OWNER-GUIDE.md`](./docs/OWNER-GUIDE.md)**
 
-### Security model
+Please follow that guide step by step for a working installation — it covers requirements,
+`.env` configuration, first-run setup, starting the server, and production hardening.
 
-- Every request is scoped to the signed-in user's university; campuses are isolated.
-- The owner is a business role with no access to members, scans or reports.
-- External scan calls need the kiosk key; browser kiosk pages are same-origin.
-- Expired or suspended subscriptions block admin access and kiosk scans.
+## Documentation
+
+The same documentation is also available inside the running app, under **Documentation** in the
+owner sidebar.
+
+## Usage Terms
+
+- **Personal / non-commercial use:** You are free to install and use this software for personal,
+  educational, or internal non-commercial purposes.
+- **Commercial use:** If you intend to use this software commercially (including but not limited
+  to selling access, offering it as a paid service, deploying it for a paying client, or any
+  revenue-generating use), you **must first obtain written permission from the developer**.
+  Please reach out before commercial deployment:
+
+  📧 **moradiashivam@gmail.com**
+
+- **No code modification:** Modification of the source code is **not permitted**. The software
+  must be used as distributed. If you need a change, feature, or customization, please contact
+  the developer at the email above rather than modifying the code yourself.
+
+By downloading, installing, or using this software, you agree to the terms above.
+
+## Support
+
+For questions, permissions, or customization requests, contact:
+
+📧 **moradiashivam@gmail.com**
