@@ -302,7 +302,7 @@ Sardar Patel University, Vallabhvidhyanagar
 PG Department of Library and Information Science,
 Sardar Patel University, Vallabhvidhyanagar
 
-> See the public [Developer page](public/developer.html) for the full credit layout.
+> See the public [Developer page](docs/OWNER-GUIDE.mdl) for the full credit layout.
 
 ---
 
