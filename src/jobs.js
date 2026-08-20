@@ -62,6 +62,70 @@ export async function runExpiryJob() {
   return { suspended: expired.length, reactivated: renewed.length, reminders };
 }
 
+/**
+ * Auto-exit: anybody still marked inside after the library's closing time for the
+ * day they entered gets an Exit row stamped at that closing time (method "Auto").
+ */
+export async function autoExitInstitute(instituteId) {
+  const hours = await q("SELECT * FROM library_hours WHERE institute_id = ?", [instituteId]);
+  if (!hours.length) return 0;
+  const byDay = new Map(hours.map((h) => [Number(h.weekday), h]));
+
+  // Latest log per member — an "Entry" means they are still inside.
+  const open = await q(
+    `SELECT l.member_id, l.occurred_at
+     FROM entry_exit_logs l
+     JOIN (SELECT member_id, MAX(occurred_at) AS last_at
+           FROM entry_exit_logs WHERE institute_id = ? GROUP BY member_id) x
+       ON x.member_id = l.member_id AND x.last_at = l.occurred_at
+     WHERE l.institute_id = ? AND l.action = 'Entry'`,
+    [instituteId, instituteId],
+  );
+
+  let closed = 0;
+  const now = new Date();
+  for (const row of open) {
+    const entry = new Date(row.occurred_at);
+    if (Number.isNaN(entry.getTime())) continue;
+    const rule = byDay.get(entry.getDay());
+    if (!rule || !Number(rule.auto_exit) || Number(rule.is_closed)) continue;
+
+    const [oh, om] = String(rule.open_time).split(":").map(Number);
+    const [ch, cm] = String(rule.close_time).split(":").map(Number);
+    const close = new Date(entry);
+    close.setHours(ch || 0, cm || 0, 0, 0);
+    // Overnight libraries: closing time earlier than opening time means "next day".
+    if ((ch * 60 + cm) <= (oh * 60 + om)) close.setDate(close.getDate() + 1);
+    if (close <= entry) close.setDate(close.getDate() + 1);
+    if (now < close) continue;
+
+    const stamp = close.toISOString().slice(0, 19).replace("T", " ");
+    const local = `${close.getFullYear()}-${String(close.getMonth() + 1).padStart(2, "0")}-${String(close.getDate()).padStart(2, "0")} ` +
+      `${String(close.getHours()).padStart(2, "0")}:${String(close.getMinutes()).padStart(2, "0")}:00`;
+    await q(
+      `INSERT INTO entry_exit_logs (id, institute_id, member_id, action, method, device_id, occurred_at)
+       VALUES (UUID(), ?, ?, 'Exit', 'Auto', 'auto-close', ?)`,
+      [instituteId, row.member_id, local || stamp],
+    );
+    closed += 1;
+  }
+  return closed;
+}
+
+/** Sweeps every university for people left inside after closing time. */
+export async function runAutoExitJob() {
+  const institutes = await q("SELECT id FROM institutes");
+  let closed = 0;
+  for (const inst of institutes) {
+    try {
+      closed += await autoExitInstitute(inst.id);
+    } catch {
+      /* one university must never break the sweep */
+    }
+  }
+  return { closed };
+}
+
 /** Runs once at boot and then every 24 hours. */
 export function startScheduler() {
   const tick = () =>
@@ -70,4 +134,11 @@ export function startScheduler() {
       .catch((e) => console.error("  expiry job failed:", e.message));
   setTimeout(tick, 5000);
   setInterval(tick, 24 * 60 * 60 * 1000).unref?.();
+
+  const autoExit = () =>
+    runAutoExitJob()
+      .then((r) => r.closed && console.log(`  auto-exit: closed ${r.closed} visit(s)`))
+      .catch((e) => console.error("  auto-exit job failed:", e.message));
+  setTimeout(autoExit, 8000);
+  setInterval(autoExit, 5 * 60 * 1000).unref?.();
 }

@@ -111,3 +111,33 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   setting_value TEXT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sip2_settings (
+  institute_id CHAR(36) NOT NULL PRIMARY KEY,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  lms_vendor VARCHAR(60) NOT NULL DEFAULT 'Koha',
+  host VARCHAR(200) NULL,
+  port INT NOT NULL DEFAULT 6001,
+  use_ssl TINYINT(1) NOT NULL DEFAULT 0,
+  encoding VARCHAR(20) NOT NULL DEFAULT 'UTF-8',
+  timeout_ms INT NOT NULL DEFAULT 5000,
+  retry_count INT NOT NULL DEFAULT 3,
+  retry_delay_ms INT NOT NULL DEFAULT 1000,
+  checksum_required TINYINT(1) NOT NULL DEFAULT 1,
+  delimiter_char VARCHAR(4) NOT NULL DEFAULT '|',
+  institution_id VARCHAR(60) NULL,
+  location_code VARCHAR(60) NULL,
+  sip_username VARCHAR(120) NULL,
+  sip_password_encrypted TEXT NULL,
+  terminal_password_encrypted TEXT NULL,
+  allowed_terminals VARCHAR(255) NULL,
+  field_map JSON NULL,
+  auto_create_members TINYINT(1) NOT NULL DEFAULT 1,
+  fallback_to_local TINYINT(1) NOT NULL DEFAULT 1,
+  log_transactions TINYINT(1) NOT NULL DEFAULT 1,
+  mask_patron_id_in_logs TINYINT(1) NOT NULL DEFAULT 1,
+  last_test_at DATETIME NULL,
+  last_test_ok TINYINT(1) NULL,
+  last_test_message VARCHAR(255) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

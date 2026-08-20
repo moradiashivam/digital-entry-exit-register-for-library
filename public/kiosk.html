@@ -24,6 +24,19 @@
         <button type="submit">Check in / out</button>
       </form>
 
+      <section id="camera" class="kiosk-camera" hidden>
+        <div class="kiosk-video-wrap">
+          <video id="video" playsinline muted></video>
+          <div class="kiosk-reticle"></div>
+        </div>
+        <p class="muted" id="cameraHint">Hold the ID card barcode in front of the camera.</p>
+        <div class="row kiosk-cam-actions">
+          <button type="button" id="camStart">Allow camera</button>
+          <button type="button" id="camStop" hidden>Stop camera</button>
+        </div>
+      </section>
+
+
       <div id="result" class="kiosk-result"></div>
       <p class="muted kiosk-footer" id="footer"></p>
     </section>

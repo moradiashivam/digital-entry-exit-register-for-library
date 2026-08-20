@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { q, one, uuid } from "../db.js";
+import { q, one, uuid, localDate, localDateTime } from "../db.js";
 import { kioskEnabled } from "../auth.js";
+import { patronInformation, maskId } from "../sip2.js";
 
 const router = Router();
 
@@ -36,7 +37,7 @@ async function recordFailure(instituteId, deviceId, code, reason, method) {
 router.post("/scan-event", async (req, res) => {
   const body = req.body || {};
   const slug = String(body.institute || "").trim();
-  const method = ["Palm", "RFID", "Manual"].includes(body.method) ? body.method : "Palm";
+  let method = ["Palm", "RFID", "Manual", "Barcode"].includes(body.method) ? body.method : "Palm";
   const deviceId = String(body.device_id || "kiosk-1");
 
   const inst = await one("SELECT * FROM institutes WHERE slug = ?", [slug]);
@@ -79,6 +80,55 @@ router.post("/scan-event", async (req, res) => {
   }
 
   const attempted = body.member_code || body.rfid_uid || body.template_id || null;
+
+  // ---- SIP2 fallback: ask the university's own LMS about this card ----
+  if (!member && attempted && !body.template_id) {
+    const sip = await one("SELECT * FROM sip2_settings WHERE institute_id = ? AND enabled = 1", [inst.id]);
+    if (sip?.host) {
+      const terminals = String(sip.allowed_terminals || "").split(",").map((t) => t.trim()).filter(Boolean);
+      if (terminals.length && !terminals.includes(deviceId)) {
+        await recordFailure(inst.id, deviceId, attempted, "Terminal not allowed for SIP2", method);
+        return res.status(403).json({ status: "rejected", message: "This kiosk terminal is not authorised" });
+      }
+      const card = String(attempted);
+      try {
+        const lms = await patronInformation(sip, card, { terminal: deviceId });
+        const shown = sip.mask_patron_id_in_logs ? maskId(card) : card;
+        if (!lms.granted) {
+          await recordFailure(inst.id, deviceId, shown, `SIP2: ${lms.reason || "denied"}`, method);
+          return res.status(403).json({
+            status: "rejected",
+            reason: "sip2_denied",
+            member_name: lms.name || null,
+            message: lms.reason || "Membership expired/invalid",
+          });
+        }
+        if (!Number(sip.auto_create_members)) {
+          await recordFailure(inst.id, deviceId, shown, "SIP2 patron not registered locally", method);
+          return res.status(404).json({
+            status: "rejected",
+            member_name: lms.name || null,
+            message: "Patron verified by the LMS but not registered on the kiosk",
+          });
+        }
+        const newId = uuid();
+        await q(
+          `INSERT INTO members (id, institute_id, member_code, full_name, mobile, email, rfid_uid,
+             valid_from, valid_to, status, source, external_ref)
+           VALUES (?,?,?,?,'','',?, CURDATE(), ?, 'Active', 'sip2_sync', ?)`,
+          [newId, inst.id, card, lms.name || card, body.rfid_uid ? card : null,
+           lms.expiry || new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10), card],
+        );
+        member = await one("SELECT * FROM members WHERE id = ?", [newId]);
+      } catch (e) {
+        if (!Number(sip.fallback_to_local)) {
+          await recordFailure(inst.id, deviceId, attempted, `SIP2 unreachable: ${e.message}`.slice(0, 190), method);
+          return res.status(502).json({ status: "rejected", message: "Library system (SIP2) unreachable — contact the desk" });
+        }
+      }
+    }
+  }
+
   if (!member) {
     await recordFailure(inst.id, deviceId, attempted, "No matching member", method);
     return res.status(404).json({ status: "rejected", message: "No matching member found" });
@@ -94,7 +144,7 @@ router.post("/scan-event", async (req, res) => {
       message: `Membership expired — kindly renew your membership (status: ${member.status.toLowerCase()})`,
     });
   }
-  const day = new Date().toISOString().slice(0, 10);
+  const day = localDate();
   const validFrom = String(member.valid_from).slice(0, 10);
   const validTo = String(member.valid_to).slice(0, 10);
   if (validFrom > day || validTo < day) {
@@ -111,16 +161,18 @@ router.post("/scan-event", async (req, res) => {
     });
   }
 
+  const recordedAt = localDateTime();
+  const windowStart = localDateTime(new Date(Date.now() - 48 * 60 * 60 * 1000));
   const last = await one(
-    `SELECT action FROM entry_exit_logs WHERE member_id = ? AND occurred_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
-     ORDER BY occurred_at DESC LIMIT 1`, [member.id]);
+    `SELECT action FROM entry_exit_logs WHERE member_id = ? AND occurred_at >= ?
+     ORDER BY occurred_at DESC LIMIT 1`, [member.id, windowStart]);
   const action = last?.action === "Entry" ? "Exit" : "Entry";
 
   await q(
-    `INSERT INTO entry_exit_logs (id, institute_id, member_id, action, method, device_id, matched_confidence)
-     VALUES (?,?,?,?,?,?,?)`,
+    `INSERT INTO entry_exit_logs (id, institute_id, member_id, action, method, device_id, matched_confidence, occurred_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
     [uuid(), inst.id, member.id, action, method, deviceId,
-     body.confidence != null ? Number(body.confidence) : null],
+     body.confidence != null ? Number(body.confidence) : null, recordedAt],
   );
 
   res.json({
@@ -132,7 +184,7 @@ router.post("/scan-event", async (req, res) => {
       full_name: member.full_name,
       photo_url: member.photo_url,
     },
-    occurred_at: new Date().toISOString(),
+    occurred_at: recordedAt,
   });
 });
 

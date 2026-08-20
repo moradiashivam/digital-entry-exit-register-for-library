@@ -1,4 +1,5 @@
 import { state } from "/app/admin.js";
+import { TIMEZONES, setTimezone } from "/app/api.js";
 import { ACCENTS, getAccent, applyAccent, getTheme, applyTheme } from "/app/theme.js";
 
 const TEXT_FIELDS = [
@@ -14,6 +15,7 @@ const TOGGLES = [
   ["allow_palm", "Allow palm scan"],
   ["allow_rfid", "Allow RFID card"],
   ["allow_manual", "Allow manual code entry"],
+  ["allow_barcode", "Allow camera barcode scan"],
   ["show_photo", "Show student photo"],
   ["show_clock", "Show clock"],
 ];
@@ -23,32 +25,95 @@ export async function renderSettings(view, { api, esc, toast }) {
   const slug = state.institute?.slug ?? "";
 
   view.innerHTML = `
-    <div class="grid cols-2">
-      <div class="panel">
-        <h3>Kiosk branding</h3>
-        <p class="muted">Kiosk link: <a href="/kiosk/${esc(slug)}" target="_blank">/kiosk/${esc(slug)}</a></p>
-        ${TEXT_FIELDS.map(([k, label]) =>
-          `<label for="s_${k}">${label}</label><input id="s_${k}" style="width:100%" value="${esc(s[k] ?? "")}" />`).join("")}
-        <label for="s_result_seconds">Result screen seconds</label>
-        <input id="s_result_seconds" type="number" min="2" max="30" value="${esc(s.result_seconds ?? 7)}" />
-        <label for="s_theme">Kiosk colour mode</label>
-        <select id="s_theme" style="width:100%">
-          <option value="dark"${s.theme === "dark" ? " selected" : ""}>Dark</option>
-          <option value="light"${s.theme === "dark" ? "" : " selected"}>Light</option>
-        </select>
-        <div style="margin-top:.9rem">
-          ${TOGGLES.map(([k, label]) =>
-            `<label style="display:flex;gap:.5rem;align-items:center;color:var(--text)">
-              <input type="checkbox" id="s_${k}" ${s[k] ? "checked" : ""} style="width:auto" /> ${label}</label>`).join("")}
+    <div class="settings-layout">
+      <div class="settings-col">
+        <div class="panel">
+          <h3>Kiosk branding</h3>
+          <p class="muted">Kiosk link: <a href="/kiosk/${esc(slug)}" target="_blank">/kiosk/${esc(slug)}</a></p>
+          <div class="field-grid">
+            ${TEXT_FIELDS.map(([k, label]) =>
+              `<div class="field"><label for="s_${k}">${label}</label><input id="s_${k}" value="${esc(s[k] ?? "")}" /></div>`).join("")}
+            <div class="field"><label for="s_result_seconds">Result screen seconds</label>
+              <input id="s_result_seconds" type="number" min="2" max="30" value="${esc(s.result_seconds ?? 7)}" /></div>
+            <div class="field"><label for="s_timezone">Local time zone</label>
+              <select id="s_timezone">
+                ${TIMEZONES.map(([id, label]) =>
+                  `<option value="${esc(id)}"${(s.timezone || "Asia/Kolkata") === id ? " selected" : ""}>${esc(label)}</option>`).join("")}
+              </select></div>
+            <div class="field"><label for="s_theme">Kiosk colour mode</label>
+              <select id="s_theme">
+                <option value="dark"${s.theme === "dark" ? " selected" : ""}>Dark</option>
+                <option value="light"${s.theme === "dark" ? "" : " selected"}>Light</option>
+              </select></div>
+          </div>
+          <div class="toggle-grid">
+            ${TOGGLES.map(([k, label]) =>
+              `<label class="toggle-item">
+                <input type="checkbox" id="s_${k}" ${s[k] ? "checked" : ""} /> <span>${label}</span></label>`).join("")}
+          </div>
+          <button id="save" style="margin-top:1rem">Save kiosk settings</button>
         </div>
-        <button id="save" style="margin-top:1rem">Save kiosk settings</button>
+
+        <div class="panel appearance">
+          <h3 style="display:flex;align-items:center;gap:.45rem"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="var(--brand)"/><circle cx="17.5" cy="10.5" r=".5" fill="var(--brand)"/><circle cx="8.5" cy="7.5" r=".5" fill="var(--brand)"/><circle cx="6.5" cy="12.5" r=".5" fill="var(--brand)"/><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2 2 2 0 0 1 2-2h2a4 4 0 0 0 4-4 10 10 0 0 0-10-10z"/></svg>Appearance</h3>
+          <p class="muted">Pick the accent colour used across charts, buttons and the kiosk preview.</p>
+          <div class="accent-grid">
+            ${ACCENTS.map((a) => `
+              <button type="button" class="accent-option" data-accent="${a.id}">
+                <span class="accent-dot" style="background:${a.brand}"></span>${esc(a.label)}
+              </button>`).join("")}
+          </div>
+          <div class="appearance-row">
+            <span>Dark mode</span>
+            <label class="switch"><input type="checkbox" id="darkToggle" /><span class="slider"></span></label>
+          </div>
+          <button class="ghost" id="resetAppearance" style="width:100%;margin-top:.7rem">Reset to default</button>
+        </div>
+
+        <div class="panel">
+          <h3>Library working hours</h3>
+          <p class="muted">Set opening and closing time for each day. Anyone still marked inside is
+            automatically exited at that day's closing time.</p>
+          <div id="hoursBox" class="muted">Loading…</div>
+        </div>
+
+        <div class="panel">
+          <h3>Staff with access</h3>
+          <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th></tr></thead>
+            <tbody id="staff"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody></table>
+          <p class="muted" style="margin-top:.6rem">Logins are issued by the platform owner.</p>
+        </div>
+
+        <div class="panel">
+          <h3>Data backup &amp; restore</h3>
+          <p class="muted">Downloads a JSON backup of <strong>this university only</strong> — members, palm templates,
+            entry/exit logs, imports, master data, audit trail and kiosk settings. Login accounts, passwords and
+            other universities are never included.</p>
+          <div class="row">
+            <button id="bkDownload">Download backup</button>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:1rem 0" />
+          <div class="field"><label for="bkMode">Restore mode</label>
+            <select id="bkMode">
+              <option value="replace">Replace — delete current data, then load the backup</option>
+              <option value="merge">Merge — add missing records, keep existing ones</option>
+            </select></div>
+          <div class="row" style="margin-top:.6rem;align-items:center">
+            <input type="file" id="bkFile" accept="application/json,.json" />
+            <button class="ghost" id="bkRestore">Restore backup</button>
+          </div>
+          <p class="muted" style="margin-top:.6rem;color:var(--danger)">Warning: restoring in replace mode permanently
+            deletes this university's current records. Deleted data cannot be recovered without a backup file.</p>
+          <p class="muted" id="bkStatus"></p>
+        </div>
       </div>
 
-      <div>
+
+      <div class="settings-col">
         <div class="panel">
           <h3>Kiosk custom CSS</h3>
           <p class="muted">Restyle your kiosk home page. These class names are fixed and safe to target:</p>
-          <ul class="muted" style="margin:.4rem 0 .6rem 1rem;padding:0">
+          <ul class="muted class-list">
             <li><code>.kiosk</code> — full screen background</li>
             <li><code>.kiosk-card</code> — the centred card</li>
             <li><code>.kiosk-logo</code> — university logo image</li>
@@ -74,37 +139,15 @@ export async function renderSettings(view, { api, esc, toast }) {
             style="width:100%;height:340px;border:1px solid var(--line);border-radius:12px;background:#000"></iframe>
         </div>
 
-
-        <div class="panel appearance" style="margin-top:1rem">
-          <h3 style="display:flex;align-items:center;gap:.45rem"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="var(--brand)"/><circle cx="17.5" cy="10.5" r=".5" fill="var(--brand)"/><circle cx="8.5" cy="7.5" r=".5" fill="var(--brand)"/><circle cx="6.5" cy="12.5" r=".5" fill="var(--brand)"/><path d="M12 2a10 10 0 0 0 0 20 2 2 0 0 0 2-2 2 2 0 0 1 2-2h2a4 4 0 0 0 4-4 10 10 0 0 0-10-10z"/></svg>Appearance</h3>
-          <p class="muted">Pick the accent colour used across charts, buttons and the kiosk preview.</p>
-          <div class="accent-grid">
-            ${ACCENTS.map((a) => `
-              <button type="button" class="accent-option" data-accent="${a.id}">
-                <span class="accent-dot" style="background:${a.brand}"></span>${esc(a.label)}
-              </button>`).join("")}
-          </div>
-          <div class="appearance-row">
-            <span>Dark mode</span>
-            <label class="switch"><input type="checkbox" id="darkToggle" /><span class="slider"></span></label>
-          </div>
-          <button class="ghost" id="resetAppearance" style="width:100%;margin-top:.7rem">Reset to default</button>
-        </div>
-
-        <div class="panel" style="margin-top:1rem">
-          <h3>Courses, departments &amp; years</h3>
-          <p class="muted">These lists now live on the <b>Master data</b> page in the left menu.</p>
-        </div>
-
-
-        <div class="panel" style="margin-top:1rem">
-          <h3>Staff with access</h3>
-          <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th></tr></thead>
-            <tbody id="staff"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody></table>
-          <p class="muted" style="margin-top:.6rem">Logins are issued by the platform owner.</p>
+        <div class="panel">
+          <h3>SIP2 / LMS connection</h3>
+          <p class="muted">Verify cards live against this university's library system (Koha, Symphony, Alma, Sierra, Libsys…).
+            When a card is unknown locally, the kiosk asks the LMS (message 63) and reads the name (AE), valid flag (BL) and expiry.</p>
+          <div id="sipBox" class="muted">Loading…</div>
         </div>
       </div>
     </div>`;
+
 
   const paintAccents = () => {
     const current = getAccent();
@@ -159,9 +202,11 @@ export async function renderSettings(view, { api, esc, toast }) {
     for (const [k] of TEXT_FIELDS) body[k] = view.querySelector(`#s_${k}`).value;
     for (const [k] of TOGGLES) body[k] = view.querySelector(`#s_${k}`).checked;
     body.theme = view.querySelector("#s_theme").value;
+    body.timezone = view.querySelector("#s_timezone").value;
     body.custom_css = cssEditor.value;
     try {
       await api("/api/settings/kiosk", { method: "PUT", body });
+      setTimezone(body.timezone);
       toast("Kiosk settings saved");
       reloadPreview();
     } catch (e) {
@@ -188,6 +233,253 @@ export async function renderSettings(view, { api, esc, toast }) {
     saveCss("");
   };
 
+
+
+  // ---------- Library working hours ----------
+  const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const hoursBox = view.querySelector("#hoursBox");
+  const paintHours = (days) => {
+    hoursBox.classList.remove("muted");
+    hoursBox.innerHTML = `
+      <table class="hours-table">
+        <thead><tr><th>Day</th><th>Opening</th><th>Closing</th><th>Closed</th><th>Auto exit</th></tr></thead>
+        <tbody>${days.map((d) => `<tr data-day="${d.weekday}">
+          <td>${DAY_NAMES[d.weekday]}</td>
+          <td><input type="time" class="h-open" value="${esc(d.open_time)}" ${d.is_closed ? "disabled" : ""} /></td>
+          <td><input type="time" class="h-close" value="${esc(d.close_time)}" ${d.is_closed ? "disabled" : ""} /></td>
+          <td><input type="checkbox" class="h-closed" ${d.is_closed ? "checked" : ""} /></td>
+          <td><input type="checkbox" class="h-auto" ${d.auto_exit ? "checked" : ""} /></td>
+        </tr>`).join("")}</tbody>
+      </table>
+      <div class="row" style="margin-top:.8rem">
+        <button id="saveHours">Save working hours</button>
+        <button class="ghost" id="runAutoExit">Run auto exit now</button>
+      </div>
+      <p class="muted" id="hoursStatus" style="margin-top:.5rem"></p>`;
+
+    for (const cb of hoursBox.querySelectorAll(".h-closed")) {
+      cb.onchange = () => {
+        const tr = cb.closest("tr");
+        tr.querySelector(".h-open").disabled = cb.checked;
+        tr.querySelector(".h-close").disabled = cb.checked;
+      };
+    }
+
+    const collect = () => [...hoursBox.querySelectorAll("tbody tr")].map((tr) => ({
+      weekday: Number(tr.dataset.day),
+      open_time: tr.querySelector(".h-open").value || "09:00",
+      close_time: tr.querySelector(".h-close").value || "18:00",
+      is_closed: tr.querySelector(".h-closed").checked ? 1 : 0,
+      auto_exit: tr.querySelector(".h-auto").checked ? 1 : 0,
+    }));
+
+    hoursBox.querySelector("#saveHours").onclick = async () => {
+      try {
+        await api("/api/settings/hours", { method: "PUT", body: { days: collect() } });
+        toast("Working hours saved");
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+    hoursBox.querySelector("#runAutoExit").onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        const r = await api("/api/settings/hours/auto-exit", { method: "POST" });
+        hoursBox.querySelector("#hoursStatus").textContent =
+          r.closed ? `Closed ${r.closed} open visit(s).` : "Nobody needed an automatic exit.";
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        e.target.disabled = false;
+      }
+    };
+  };
+  api("/api/settings/hours").then(paintHours).catch(() => {
+    hoursBox.textContent = "Could not load working hours.";
+  });
+
+  // ---------- Backup & restore ----------
+  const bkStatus = view.querySelector("#bkStatus");
+  const saveJson = (name, data) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  view.querySelector("#bkDownload").onclick = async () => {
+    bkStatus.textContent = "Preparing backup…";
+    try {
+      const data = await api("/api/backup/export");
+      const counts = Object.entries(data.tables).map(([k, v]) => `${k}: ${v.length}`).join(", ");
+      saveJson(`backup-${slug || "university"}-${new Date().toISOString().slice(0, 10)}.json`, data);
+      bkStatus.textContent = `Backup downloaded (${counts}).`;
+      toast("Backup downloaded");
+    } catch (e) {
+      bkStatus.textContent = `Failed: ${e.message}`;
+      toast(e.message, true);
+    }
+  };
+
+  view.querySelector("#bkRestore").onclick = async () => {
+    const file = view.querySelector("#bkFile").files?.[0];
+    if (!file) return toast("Choose a backup file first", true);
+    const mode = view.querySelector("#bkMode").value;
+    let backup;
+    try {
+      backup = JSON.parse(await file.text());
+    } catch {
+      return toast("That file is not a valid backup", true);
+    }
+    const from = backup?.institute?.name ? ` taken from "${backup.institute.name}"` : "";
+    if (!confirm(`Restore this backup${from} into ${state.institute?.name ?? "this university"} using "${mode}" mode?`)) return;
+    if (mode === "replace" && !confirm("This permanently deletes the current members, logs and settings of this university. Deleted data cannot be recovered without a backup. Continue?")) return;
+    bkStatus.textContent = "Restoring…";
+    try {
+      const r = await api("/api/backup/restore", { method: "POST", body: { backup, mode } });
+      bkStatus.textContent = `Restored (${Object.entries(r.summary).map(([k, v]) => `${k}: ${v}`).join(", ")}).`;
+      toast("Backup restored");
+    } catch (e) {
+      bkStatus.textContent = `Failed: ${e.message}`;
+      toast(e.message, true);
+    }
+  };
+
+  // ---------- SIP2 / LMS ----------
+  const FIELD_KEYS = [
+    ["patron_id", "AA"], ["patron_name", "AE"], ["valid_flag", "BL"], ["auth_flag", "CQ"],
+    ["expiry_date", "PA"], ["screen_message", "AF"], ["fee_amount", "BV"], ["charged_items_count", "CA"],
+  ];
+  const SIP_TEXT = [
+    ["host", "SIP2 host / IP"], ["institution_id", "Institution ID (AO)"], ["location_code", "Location code (CP)"],
+    ["sip_username", "SIP username"], ["allowed_terminals", "Allowed terminals (comma separated)"],
+  ];
+  const SIP_NUM = [["port", "Port"], ["timeout_ms", "Timeout (ms)"], ["retry_count", "Retries"], ["retry_delay_ms", "Retry delay (ms)"]];
+  const SIP_BOOL = [
+    ["enabled", "Enable SIP2 for this university"], ["use_ssl", "Use SSL/TLS (only for a provider-supplied TLS port)"], ["checksum_required", "Send SIP2 checksum"],
+    ["auto_create_members", "Create member record from LMS on first scan"],
+    ["fallback_to_local", "Allow local members if the LMS is unreachable"],
+    ["log_transactions", "Log SIP2 transactions"], ["mask_patron_id_in_logs", "Mask card numbers in logs"],
+  ];
+
+  const paintSip = (c) => {
+    const box = view.querySelector("#sipBox");
+    box.classList.remove("muted");
+    box.innerHTML = `
+      <div class="sip-section">
+        <h4 class="sip-sub">Connection</h4>
+        <div class="field-grid">
+          <div class="field"><label for="sip_lms_vendor">LMS vendor</label>
+            <select id="sip_lms_vendor">
+              ${["Koha", "SirsiDynix Symphony", "Ex Libris Alma", "Sierra", "Libsys", "Other"]
+                .map((v) => `<option${c.lms_vendor === v ? " selected" : ""}>${esc(v)}</option>`).join("")}
+            </select></div>
+          <div class="field"><label for="sip_host">SIP2 host / IP</label>
+            <input id="sip_host" value="${esc(c.host ?? "")}" /></div>
+          <div class="field"><label for="sip_port">Port</label>
+            <input id="sip_port" type="number" value="${esc(c.port ?? "")}" /></div>
+          <div class="field"><label for="sip_institution_id">Institution ID (AO)</label>
+            <input id="sip_institution_id" value="${esc(c.institution_id ?? "")}" /></div>
+          <div class="field"><label for="sip_location_code">Location code (CP)</label>
+            <input id="sip_location_code" value="${esc(c.location_code ?? "")}" /></div>
+        </div>
+      </div>
+
+      <div class="sip-section">
+        <h4 class="sip-sub">Credentials</h4>
+        <div class="field-grid">
+          <div class="field"><label for="sip_sip_username">SIP username</label>
+            <input id="sip_sip_username" value="${esc(c.sip_username ?? "")}" /></div>
+          <div class="field"><label for="sip_sip_password">SIP password ${c.has_sip_password ? "(saved)" : ""}</label>
+            <input id="sip_sip_password" type="password" placeholder="leave blank to keep, or \${VAULT:KEY}" /></div>
+          <div class="field"><label for="sip_terminal_password">Terminal password (AC) ${c.has_terminal_password ? "(saved)" : ""}</label>
+            <input id="sip_terminal_password" type="password" placeholder="leave blank to keep, or \${VAULT:KEY}" /></div>
+          <div class="field"><label for="sip_allowed_terminals">Allowed terminals (comma separated)</label>
+            <input id="sip_allowed_terminals" value="${esc(c.allowed_terminals ?? "")}" /></div>
+        </div>
+        <p class="muted" style="margin-top:.5rem">Store secrets outside the database with <code>\${VAULT:KEY}</code> — read from the server environment at scan time.</p>
+      </div>
+
+      <div class="sip-section">
+        <h4 class="sip-sub">Timeouts & retries</h4>
+        <div class="field-grid">
+          ${SIP_NUM.filter(([k]) => k !== "port").map(([k, l]) =>
+            `<div class="field"><label for="sip_${k}">${l}</label>
+             <input id="sip_${k}" type="number" value="${esc(c[k] ?? "")}" /></div>`).join("")}
+          <div class="field"><label for="sip_delimiter_char">Field delimiter</label>
+            <input id="sip_delimiter_char" value="${esc(c.delimiter_char ?? "|")}" /></div>
+        </div>
+      </div>
+
+      <div class="sip-section">
+        <h4 class="sip-sub">Options</h4>
+        <div class="toggle-grid sip-toggles">
+          ${SIP_BOOL.map(([k, l]) =>
+            `<label class="toggle-item"><input type="checkbox" id="sip_${k}" ${c[k] ? "checked" : ""} /> <span>${l}</span></label>`).join("")}
+        </div>
+        <p class="muted" style="margin-top:.5rem">Most SIP2 servers (port 6001) use plain TCP. Enable SSL/TLS only for a dedicated TLS port.</p>
+      </div>
+
+      <div class="sip-section">
+        <h4 class="sip-sub">Field mapping</h4>
+        <p class="muted" style="margin-top:0;margin-bottom:.6rem">Vendors differ — expiry is PA, PC or PD.</p>
+        <div class="field-grid">
+          ${FIELD_KEYS.map(([k, d]) =>
+            `<div class="field"><label for="fm_${k}">${k}</label>
+             <input id="fm_${k}" maxlength="2" style="text-transform:uppercase"
+               value="${esc(c.field_map?.[k] ?? d)}" /></div>`).join("")}
+        </div>
+      </div>
+
+      <div class="sip-actions">
+        <button id="sipSave">Save SIP2 settings</button>
+        <input id="sipCard" placeholder="Test card / barcode" class="sip-card" />
+        <button class="ghost" id="sipTest">Test connection</button>
+      </div>
+      <p class="muted" id="sipStatus" style="margin-top:.5rem">${
+        c.last_test_at ? `Last test ${esc(String(c.last_test_at).slice(0, 16))} — ${c.last_test_ok ? "OK" : "failed"}: ${esc(c.last_test_message ?? "")}` : "Not tested yet."
+      }</p>`;
+
+    const collect = () => {
+      const body = { lms_vendor: view.querySelector("#sip_lms_vendor").value, field_map: {} };
+      for (const [k] of SIP_TEXT) body[k] = view.querySelector(`#sip_${k}`).value;
+      for (const [k] of SIP_NUM) body[k] = Number(view.querySelector(`#sip_${k}`).value);
+      for (const [k] of SIP_BOOL) body[k] = view.querySelector(`#sip_${k}`).checked;
+      body.delimiter_char = view.querySelector("#sip_delimiter_char").value || "|";
+      for (const [k] of FIELD_KEYS) body.field_map[k] = view.querySelector(`#fm_${k}`).value.toUpperCase();
+      const pw = view.querySelector("#sip_sip_password").value;
+      const tp = view.querySelector("#sip_terminal_password").value;
+      if (pw) body.sip_password = pw;
+      if (tp) body.terminal_password = tp;
+      return body;
+    };
+
+    view.querySelector("#sipSave").onclick = async () => {
+      try {
+        paintSip(await api("/api/sip2", { method: "PUT", body: collect() }));
+        toast("SIP2 settings saved");
+      } catch (e) { toast(e.message, true); }
+    };
+    view.querySelector("#sipTest").onclick = async () => {
+      const card = view.querySelector("#sipCard").value.trim();
+      if (!card) return toast("Enter a test card / barcode", true);
+      const status = view.querySelector("#sipStatus");
+      status.textContent = "Contacting the LMS…";
+      try {
+        const r = await api("/api/sip2/test", { method: "POST", body: { card_id: card } });
+        status.style.color = "";
+        status.textContent = `${r.granted ? "Granted" : "Denied"} — name: ${r.name || "(none)"}, expiry: ${r.expiry || "n/a"}${r.reason ? `, reason: ${r.reason}` : ""}`;
+      } catch (e) {
+        status.style.color = "var(--danger)";
+        status.textContent = `Failed: ${e.message}`;
+      }
+    };
+  };
+
+  api("/api/sip2").then(paintSip).catch(() => {
+    view.querySelector("#sipBox").textContent = "SIP2 settings unavailable.";
+  });
 
   const staff = (await api("/api/settings/staff").catch(() => [])) || [];
   view.querySelector("#staff").innerHTML = staff.length

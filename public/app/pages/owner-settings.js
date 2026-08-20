@@ -63,9 +63,67 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
       <div style="margin-top:1rem">${smtpForm("fallback", { ...fallback, is_fallback: 1 }, "Fallback SMTP")}</div>
 
       <div class="panel" style="margin-top:1rem">
+        <h3 style="margin-top:0">Master database backup &amp; restore</h3>
+        <p class="muted">Downloads every table of the platform database — all universities, members, logs, plans,
+          payments, leads and accounts — as a single JSON file. Keep it somewhere safe: it contains all tenant data.</p>
+        <div class="row">
+          <button id="mbDownload">Download master backup</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--line);margin:1rem 0" />
+        <div class="row" style="align-items:center">
+          <input type="file" id="mbFile" accept="application/json,.json" />
+          <button class="ghost" id="mbRestore">Restore master backup</button>
+        </div>
+        <p class="muted" style="color:var(--danger)">Warning: a master restore wipes and replaces the entire database,
+          including logins. Data that is not in the backup file cannot be recovered. You may have to sign in again.</p>
+        <p class="muted" id="mbStatus"></p>
+      </div>
+
+      <div class="panel" style="margin-top:1rem">
         <h3 style="margin-top:0">Platform audit trail</h3>
         <div id="audit" class="muted">Loading…</div>
       </div>`;
+
+    const mbStatus = view.querySelector("#mbStatus");
+    view.querySelector("#mbDownload").onclick = async () => {
+      mbStatus.textContent = "Preparing master backup…";
+      try {
+        const data = await api("/api/backup/master/export");
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: "application/json" }));
+        a.download = `master-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        mbStatus.textContent = `Downloaded ${Object.keys(data.tables).length} tables.`;
+        toast("Master backup downloaded");
+      } catch (e) {
+        mbStatus.textContent = `Failed: ${e.message}`;
+        toast(e.message, true);
+      }
+    };
+
+    view.querySelector("#mbRestore").onclick = async () => {
+      const file = view.querySelector("#mbFile").files?.[0];
+      if (!file) return toast("Choose a master backup file first", true);
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch {
+        return toast("That file is not a valid backup", true);
+      }
+      if (!confirm("Replace the entire platform database with this backup?")) return;
+      if (!confirm("Final confirmation: all current data, including universities and logins, will be permanently deleted and cannot be recovered without another backup. Continue?")) return;
+      mbStatus.textContent = "Restoring master database…";
+      try {
+        const r = await api("/api/backup/master/restore", { method: "POST", body: { backup } });
+        mbStatus.textContent = `Restored ${Object.keys(r.summary).length} tables. Sign in again if your session stops working.`;
+        toast("Master backup restored");
+      } catch (e) {
+        mbStatus.textContent = `Failed: ${e.message}`;
+        toast(e.message, true);
+      }
+    };
+
 
     view.querySelector("#saveSettings").onclick = async () => {
       try {

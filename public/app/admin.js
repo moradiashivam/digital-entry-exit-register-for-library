@@ -1,4 +1,4 @@
-import { api, clearToken, getInstitute, setInstitute, toast, esc, fmtDate, downloadCsv } from "/app/api.js";
+import { api, clearToken, getInstitute, setInstitute, toast, esc, fmtDate, downloadCsv, setTimezone, setServerTimezone } from "/app/api.js";
 import { renderDashboard } from "/app/pages/dashboard.js";
 import { renderMembers } from "/app/pages/members.js";
 import { renderImport } from "/app/pages/import.js";
@@ -145,6 +145,15 @@ async function boot() {
       Contact the platform owner to renew.</p></div>`;
     return;
   }
+  // Load the university's local time zone so every date on screen uses it.
+  try {
+    const ks = await api("/api/settings/kiosk");
+    setServerTimezone(ks?.server_timezone);
+    setTimezone(ks?.timezone);
+  } catch {
+    /* falls back to the stored/default zone */
+  }
+
   navigate(location.hash.slice(1) || "dashboard");
 }
 

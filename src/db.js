@@ -2,6 +2,15 @@ import mysql from "mysql2/promise";
 import { randomUUID, randomBytes } from "node:crypto";
 import "dotenv/config";
 
+/** "+05:30" style offset of the computer running Node, for MySQL's session clock. */
+function localOffset(date = new Date()) {
+  const mins = -date.getTimezoneOffset();
+  const sign = mins < 0 ? "-" : "+";
+  const abs = Math.abs(mins);
+  const pad = (v) => String(v).padStart(2, "0");
+  return `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}
+
 export const pool = mysql.createPool({
   host: process.env.DB_HOST || "127.0.0.1",
   port: Number(process.env.DB_PORT || 3306),
@@ -13,6 +22,16 @@ export const pool = mysql.createPool({
   dateStrings: true,
   timezone: "local",
 });
+
+/**
+ * Keep MySQL's clock (NOW(), CURDATE(), CURRENT_TIMESTAMP defaults) identical to
+ * the computer running this app, so dashboard "today", durations and peak hour
+ * match the times shown at the kiosk.
+ */
+pool.on("connection", (conn) => {
+  conn.query(`SET time_zone = '${localOffset()}'`, () => {});
+});
+
 
 /** Run a query and return rows. */
 export async function q(sql, params = []) {
@@ -29,11 +48,21 @@ export async function one(sql, params = []) {
 export const uuid = () => randomUUID();
 export const kioskKey = () => randomBytes(16).toString("hex");
 
-export const today = () => new Date().toISOString().slice(0, 10);
+/** MySQL DATETIME text using the local clock of the computer running Node. */
+export function localDateTime(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** Local calendar date of the computer running Node. */
+export const localDate = (date = new Date()) => localDateTime(date).slice(0, 10);
+
+export const today = () => localDate();
 export const plusYear = () => {
   const d = new Date();
   d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  return localDate(d);
 };
 
 /** Add tables / columns introduced after the first release (safe on every boot). */
@@ -64,6 +93,10 @@ export async function ensureSchemaExtras() {
     ["institutes", "status", "ENUM('Active','Suspended','Deactivated') NOT NULL DEFAULT 'Active'"],
     ["institutes", "auto_renew", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["institutes", "lead_id", "CHAR(36) NULL"],
+    ["members", "import_batch_id", "CHAR(36) NULL"],
+    ["bulk_import_logs", "duplicate_count", "INT NOT NULL DEFAULT 0"],
+    ["bulk_import_logs", "updated_count", "INT NOT NULL DEFAULT 0"],
+    ["bulk_import_logs", "skipped_count", "INT NOT NULL DEFAULT 0"],
   ];
   for (const [table, column, ddl] of extras) {
     const found = await one(

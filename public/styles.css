@@ -45,11 +45,13 @@ label { display: block; font-size: .8rem; color: var(--muted); margin: .5rem 0 .
 button {
   cursor: pointer;
   background: var(--brand);
+  color: #fff;
   border-color: transparent;
   font-weight: 600;
 }
 button:hover { filter: brightness(1.08); }
-button.ghost { background: transparent; border-color: var(--line); font-weight: 500; }
+button.ghost { background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; }
+button.ghost:hover { background: var(--line); }
 button.danger { background: var(--danger); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
@@ -144,6 +146,8 @@ body.light {
   background: radial-gradient(1200px 600px at 20% -10%, #e6ecfb 0%, var(--bg) 60%);
 }
 body.light input, body.light select, body.light textarea { background: #fff; }
+body.light button.ghost { background: #eef2fb; border-color: #c2cee6; color: #1d2740; }
+body.light button.ghost:hover { background: #e0e8fa; }
 body.light .side { background: #eef2fb; }
 body.light tbody tr:hover { background: #0000000a; }
 body.light .badge.ok { color: #fff; }
@@ -306,3 +310,67 @@ body.light .accent-option:hover { background: #0000000a; }
   vertical-align: top;
 }
 .doc-table th { font-weight: 600; }
+
+/* ---- Settings page layout ---- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.settings-col { display: grid; gap: 1rem; align-content: start; min-width: 0; }
+.settings-col .panel { margin: 0; }
+@media (max-width: 1100px) { .settings-layout { grid-template-columns: 1fr; } }
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .6rem .8rem;
+  margin-top: .8rem;
+}
+.field { display: grid; gap: .25rem; min-width: 0; }
+.field label { margin: 0; }
+.field input, .field select { width: 100%; }
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: .45rem .8rem;
+  margin-top: 1rem;
+  padding-top: .9rem;
+  border-top: 1px solid var(--line);
+}
+.toggle-item {
+  display: flex; align-items: center; gap: .5rem;
+  margin: 0; color: var(--text); font-size: .9rem;
+}
+.toggle-item input { width: auto; margin: 0; }
+
+.class-list { margin: .4rem 0 .6rem 1rem; padding: 0; }
+
+/* SIP2 / LMS connection box */
+.sip-section { margin-top: 1.1rem; }
+.sip-section:first-child { margin-top: 0; }
+.sip-sub {
+  font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted, var(--text)); margin: 0 0 .15rem;
+  padding-bottom: .3rem; border-bottom: 1px solid var(--line);
+}
+.sip-section .field-grid { margin-top: .6rem; }
+.sip-toggles { border-top: none; padding-top: 0; margin-top: .6rem; }
+.sip-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1.2rem; }
+.sip-actions .sip-card { max-width: 220px; flex: 1 1 220px; }
+
+/* Camera barcode scanning at the kiosk */
+.kiosk-camera { margin: 1rem 0; text-align: center; }
+.kiosk-video-wrap { position: relative; width: min(420px, 100%); margin: 0 auto; aspect-ratio: 4 / 3;
+  border-radius: 14px; overflow: hidden; background: #000; border: 1px solid var(--line); }
+.kiosk-video-wrap video { width: 100%; height: 100%; object-fit: cover; }
+.kiosk-reticle { position: absolute; inset: 22% 10%; border: 3px solid rgba(255,255,255,.85);
+  border-radius: 10px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.25); pointer-events: none; }
+.kiosk-cam-actions { justify-content: center; margin-top: .6rem; }
+
+/* Library working hours table */
+.hours-table { width: 100%; }
+.hours-table input[type="time"] { width: 100%; padding: .35rem .45rem; }
+.hours-table td, .hours-table th { text-align: left; }

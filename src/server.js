@@ -13,6 +13,8 @@ import reportRoutes from "./routes/reports.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import ownerRoutes from "./routes/owner.routes.js";
+import sip2Routes from "./routes/sip2.routes.js";
+import backupRoutes from "./routes/backup.routes.js";
 import { startScheduler } from "./jobs.js";
 
 
@@ -20,7 +22,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(loadUser);
 
 app.get("/api/health", async (_req, res) => {
@@ -40,6 +42,8 @@ app.use("/api/masters", masterRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/owner", ownerRoutes);
+app.use("/api/sip2", sip2Routes);
+app.use("/api/backup", backupRoutes);
 
 
 app.use(express.static(path.join(__dirname, "..", "public")));
