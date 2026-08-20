@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { q } from "../db.js";
+import { q, one, localDateTime } from "../db.js";
 import { requireAuth, withInstitute, canViewReports, isStaff } from "../auth.js";
+import { serverTimezone, wallClockToDate, zoneParts, todayKey } from "../tz.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -8,29 +9,43 @@ router.use(requireAuth);
 /** Live occupancy, today's numbers, breakdowns and the 14-day trend. */
 router.get("/dashboard", withInstitute(canViewReports), async (req, res) => {
   const id = req.institute.id;
-  const [[totals], windowRows, trend, recent] = await Promise.all([
+  // Times follow the computer system clock of the host running this app.
+  const tz = serverTimezone();
+  const today_key = todayKey(tz);
+  const now = new Date();
+  const nowText = localDateTime(now);
+  const windowStart = localDateTime(new Date(now.getTime() - 48 * 60 * 60 * 1000));
+  const trendStart = new Date(now);
+  trendStart.setDate(trendStart.getDate() - 13);
+  trendStart.setHours(0, 0, 0, 0);
+  const trendStartText = localDateTime(trendStart);
+
+  const [[totals], statusMix, windowRows, trend, recent] = await Promise.all([
+
     q(`SELECT COUNT(*) AS total,
               SUM(status = 'Active') AS active,
               SUM(valid_to < CURDATE()) AS expired
        FROM members WHERE institute_id = ?`, [id]),
+    q(`SELECT status AS name, COUNT(*) AS count FROM members
+       WHERE institute_id = ? GROUP BY status ORDER BY count DESC`, [id]),
     // Two-day window so people who entered before midnight still count as inside.
     q(`SELECT l.member_id, l.action, l.method, l.occurred_at,
               HOUR(l.occurred_at) AS log_hour,
-              (DATE(l.occurred_at) = CURDATE()) AS is_today,
-              TIMESTAMPDIFF(MINUTE, l.occurred_at, NOW()) AS mins_ago,
+               (DATE(l.occurred_at) = ?) AS is_today,
+               TIMESTAMPDIFF(MINUTE, l.occurred_at, ?) AS mins_ago,
               m.full_name, m.member_code, m.gender, m.photo_url,
               d.name AS department, c.name AS course
        FROM entry_exit_logs l
        JOIN members m ON m.id = l.member_id
        LEFT JOIN departments d ON d.id = m.department_id
        LEFT JOIN courses c ON c.id = m.course_id
-       WHERE l.institute_id = ? AND l.occurred_at >= DATE_SUB(NOW(), INTERVAL 48 HOUR)
-       ORDER BY l.occurred_at ASC`, [id]),
+       WHERE l.institute_id = ? AND l.occurred_at >= ?
+       ORDER BY l.occurred_at ASC`, [today_key, nowText, id, windowStart]),
     q(`SELECT DATE(occurred_at) AS day,
               SUM(action = 'Entry') AS entries, SUM(action = 'Exit') AS exits
        FROM entry_exit_logs
-       WHERE institute_id = ? AND occurred_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
-       GROUP BY DATE(occurred_at) ORDER BY day`, [id]),
+        WHERE institute_id = ? AND occurred_at >= ?
+        GROUP BY DATE(occurred_at) ORDER BY day`, [id, trendStartText]),
     q(`SELECT l.id, l.action, l.method, l.occurred_at, m.full_name, m.member_code
        FROM entry_exit_logs l JOIN members m ON m.id = l.member_id
        WHERE l.institute_id = ? ORDER BY l.occurred_at DESC LIMIT 10`, [id]),
@@ -46,8 +61,12 @@ router.get("/dashboard", withInstitute(canViewReports), async (req, res) => {
   let exits = 0;
 
   for (const r of windowRows) {
-    const today = Number(r.is_today) === 1;
-    const hour = Math.min(23, Math.max(0, Number(r.log_hour) || 0));
+    // Bucket by the university's own clock, not the database server's.
+    const at = wallClockToDate(r.occurred_at);
+    const parts = at ? zoneParts(at, tz) : null;
+    const today = parts ? parts.dayKey === today_key : Number(r.is_today) === 1;
+    const hour = Math.min(23, Math.max(0, parts ? parts.hour : Number(r.log_hour) || 0));
+
     if (r.action === "Entry") {
       if (today) {
         entries += 1;
@@ -93,6 +112,7 @@ router.get("/dashboard", withInstitute(canViewReports), async (req, res) => {
       active: Number(totals.active || 0),
       expired: Number(totals.expired || 0),
     },
+    memberMix: statusMix.map((r) => ({ name: r.name, count: Number(r.count) })),
     today: {
       entries,
       exits,
@@ -150,7 +170,8 @@ router.get("/audit", withInstitute(isStaff), async (req, res) => {
 
 router.get("/imports", withInstitute(isStaff), async (req, res) => {
   res.json(await q(
-    `SELECT * FROM bulk_import_logs WHERE institute_id = ? ORDER BY created_at DESC LIMIT 200`,
+    `SELECT l.*, (SELECT COUNT(*) FROM members m WHERE m.import_batch_id = l.id) AS members_remaining
+     FROM bulk_import_logs l WHERE l.institute_id = ? ORDER BY l.created_at DESC LIMIT 200`,
     [req.institute.id],
   ));
 });

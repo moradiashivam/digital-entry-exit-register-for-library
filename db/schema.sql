@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS members (
   department_id CHAR(36) NULL,
   academic_year_id CHAR(36) NULL,
   gender ENUM('Male','Female','Other') NOT NULL DEFAULT 'Other',
-  mobile VARCHAR(10) NOT NULL,
-  email VARCHAR(200) NOT NULL,
+  mobile VARCHAR(10) NULL,
+  email VARCHAR(200) NULL,
   photo_url TEXT NULL,
   rfid_uid VARCHAR(64) NULL,
   valid_from DATE NOT NULL,
@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS members (
   source ENUM('manual','excel_import','sip2_sync') NOT NULL DEFAULT 'manual',
   external_ref VARCHAR(120) NULL,
   consent_given TINYINT(1) NOT NULL DEFAULT 0,
+  import_batch_id CHAR(36) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_member_code (institute_id, member_code),
@@ -168,6 +169,9 @@ CREATE TABLE IF NOT EXISTS bulk_import_logs (
   total_rows INT NOT NULL DEFAULT 0,
   success_count INT NOT NULL DEFAULT 0,
   error_count INT NOT NULL DEFAULT 0,
+  duplicate_count INT NOT NULL DEFAULT 0,
+  updated_count INT NOT NULL DEFAULT 0,
+  skipped_count INT NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_import_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -184,13 +188,27 @@ CREATE TABLE IF NOT EXISTS kiosk_settings (
   allow_palm TINYINT(1) NOT NULL DEFAULT 1,
   allow_rfid TINYINT(1) NOT NULL DEFAULT 1,
   allow_manual TINYINT(1) NOT NULL DEFAULT 1,
+  allow_barcode TINYINT(1) NOT NULL DEFAULT 1,
   show_photo TINYINT(1) NOT NULL DEFAULT 1,
   show_clock TINYINT(1) NOT NULL DEFAULT 1,
   result_seconds INT NOT NULL DEFAULT 7,
+  timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
   theme ENUM('dark','light') NOT NULL DEFAULT 'light',
   custom_css TEXT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_kiosk_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS library_hours (
+  institute_id CHAR(36) NOT NULL,
+  weekday TINYINT NOT NULL,               -- 0 = Sunday … 6 = Saturday
+  is_closed TINYINT(1) NOT NULL DEFAULT 0,
+  open_time TIME NOT NULL DEFAULT '09:00:00',
+  close_time TIME NOT NULL DEFAULT '18:00:00',
+  auto_exit TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (institute_id, weekday),
+  CONSTRAINT fk_hours_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 SET FOREIGN_KEY_CHECKS = 1;

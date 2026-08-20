@@ -25,7 +25,10 @@ function applyCustomCss(css) {
 
 const startClock = () => {
   const tick = () => {
-    el("clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    // Kiosk clock = this computer's system time.
+    el("clock").textContent = new Date().toLocaleTimeString("en-GB", {
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
   };
   tick();
   setInterval(tick, 1000);
@@ -36,6 +39,7 @@ function paintTabs() {
     ["Palm", settings.allow_palm, "Palm scan"],
     ["RFID", settings.allow_rfid, "RFID card"],
     ["Manual", settings.allow_manual, "Manual code"],
+    ["Barcode", settings.allow_barcode, "Camera barcode"],
   ].filter(([, on]) => on);
   method = options.some(([m]) => m === method) ? method : options[0]?.[0] ?? "Manual";
   el("tabs").innerHTML = options
@@ -43,7 +47,94 @@ function paintTabs() {
     .join("");
   el("code").placeholder =
     method === "RFID" ? "Tap the RFID card…" :
-    method === "Palm" ? "Waiting for the palm scanner…" : "Type the member code";
+    method === "Palm" ? "Waiting for the palm scanner…" :
+    method === "Barcode" ? "Or type the member code" : "Type the member code";
+  const cam = el("camera");
+  if (cam) {
+    cam.hidden = method !== "Barcode";
+    if (method !== "Barcode") stopCamera();
+  }
+}
+
+/* ---------- camera barcode scanning ---------- */
+let stream = null;
+let scanning = false;
+let zxingReader = null;
+let lastCode = "";
+let lastCodeAt = 0;
+
+function camHint(text) { const h = el("cameraHint"); if (h) h.textContent = text; }
+
+function stopCamera() {
+  scanning = false;
+  try { zxingReader?.reset?.(); } catch {}
+  zxingReader = null;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  const v = el("video");
+  if (v) v.srcObject = null;
+  el("camStop").hidden = true;
+  el("camStart").hidden = false;
+}
+
+function onDetected(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return;
+  const now = Date.now();
+  if (value === lastCode && now - lastCodeAt < 4000) return;   // ignore repeat frames
+  lastCode = value; lastCodeAt = now;
+  camHint(`Barcode read: ${value}`);
+  submitScan(value, "Barcode");
+}
+
+async function startCamera() {
+  if (scanning) return;
+  camHint("Asking for camera permission…");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } },
+      audio: false,
+    });
+  } catch (err) {
+    camHint(err?.name === "NotAllowedError"
+      ? "Camera permission was blocked. Allow it in the browser address bar, then press Allow camera again."
+      : "No camera available on this device.");
+    return;
+  }
+  const video = el("video");
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  scanning = true;
+  el("camStart").hidden = true;
+  el("camStop").hidden = false;
+  camHint("Hold the ID card barcode inside the frame.");
+
+  if ("BarcodeDetector" in window) {
+    let formats = ["code_128", "code_39", "ean_13", "ean_8", "upc_a", "upc_e", "itf", "codabar", "qr_code"];
+    try {
+      const supported = await window.BarcodeDetector.getSupportedFormats();
+      formats = formats.filter((f) => supported.includes(f));
+    } catch {}
+    const detector = new window.BarcodeDetector(formats.length ? { formats } : undefined);
+    const loop = async () => {
+      if (!scanning) return;
+      try {
+        const found = await detector.detect(video);
+        if (found?.length) onDetected(found[0].rawValue);
+      } catch {}
+      setTimeout(() => requestAnimationFrame(loop), 180);
+    };
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  // Older browsers: fall back to the ZXing decoder loaded on demand.
+  try {
+    const zx = await import("https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/+esm");
+    zxingReader = new zx.BrowserMultiFormatReader();
+    zxingReader.decodeFromStream(stream, video, (result) => { if (result) onDetected(result.getText()); });
+  } catch {
+    camHint("This browser cannot read barcodes. Use Chrome or Edge, or type the member code.");
+  }
 }
 
 async function boot() {
@@ -76,7 +167,7 @@ async function boot() {
     return;
   }
   paintTabs();
-  el("code").focus();
+  if (method === "Barcode") startCamera(); else el("code").focus();
 }
 
 el("tabs").addEventListener("click", (e) => {
@@ -87,13 +178,17 @@ el("tabs").addEventListener("click", (e) => {
   el("code").focus();
 });
 
-el("scanForm").addEventListener("submit", async (e) => {
+el("scanForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const value = el("code").value.trim();
   if (!value) return;
   el("code").value = "";
-  clearTimeout(resetTimer);
+  submitScan(value, method);
+});
 
+async function submitScan(value, methodUsed) {
+  clearTimeout(resetTimer);
+  const method = methodUsed;
   const body = { institute: slug, method, device_id: deviceId };
   if (method === "RFID") body.rfid_uid = value; else body.member_code = value;
 
@@ -111,7 +206,7 @@ el("scanForm").addEventListener("submit", async (e) => {
       el("result").innerHTML = `<div class="result ${out.action === "Entry" ? "entry" : "exit"}">
         ${photo}<h2>${esc(label)} recorded</h2>
         <p>${esc(out.member.full_name)} · ${esc(out.member.member_code)}</p>
-        <p class="muted">${new Date(out.occurred_at).toLocaleString()}</p></div>`;
+        <p class="muted">${new Date(out.occurred_at).toLocaleString("en-GB")}</p></div>`;
     } else if (out.reason === "membership_expired") {
       const who = out.member_name
         ? `<p>${esc(out.member_name)}${out.member_code ? ` · ${esc(out.member_code)}` : ""}</p>` : "";
@@ -129,7 +224,10 @@ el("scanForm").addEventListener("submit", async (e) => {
   }
 
   resetTimer = setTimeout(() => { el("result").innerHTML = ""; }, (settings.result_seconds || 7) * 1000);
-  el("code").focus();
-});
+  if (method !== "Barcode") el("code").focus();
+}
+
+el("camStart").addEventListener("click", startCamera);
+el("camStop").addEventListener("click", () => { stopCamera(); camHint("Camera stopped."); });
 
 boot();

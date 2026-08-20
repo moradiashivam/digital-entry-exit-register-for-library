@@ -32,6 +32,31 @@ const run = async () => {
   await conn.query(schema);
   console.log("✔ tables created");
 
+  // Contact details are optional — relax older databases that still have them NOT NULL.
+  await conn.query("ALTER TABLE members MODIFY mobile VARCHAR(10) NULL, MODIFY email VARCHAR(200) NULL");
+  console.log("✔ member contact fields optional");
+
+  // Local time zone per university — added in a later version.
+  const [tzCol] = await conn.query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = 'kiosk_settings' AND column_name = 'timezone'",
+    [dbName],
+  );
+  if (!tzCol.length) {
+    await conn.query("ALTER TABLE kiosk_settings ADD COLUMN timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata' AFTER result_seconds");
+    console.log("✔ kiosk_settings.timezone added");
+  }
+
+
+  // Camera barcode scanning at the kiosk — added in a later version.
+  const [bcCol] = await conn.query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = 'kiosk_settings' AND column_name = 'allow_barcode'",
+    [dbName],
+  );
+  if (!bcCol.length) {
+    await conn.query("ALTER TABLE kiosk_settings ADD COLUMN allow_barcode TINYINT(1) NOT NULL DEFAULT 1 AFTER allow_manual");
+    console.log("✔ kiosk_settings.allow_barcode added");
+  }
+
   const email = (process.env.OWNER_EMAIL || "owner@example.com").toLowerCase();
   const password = process.env.OWNER_PASSWORD || "ChangeThisOwnerPassword1!";
   const [rows] = await conn.query("SELECT id FROM users WHERE email = ?", [email]);

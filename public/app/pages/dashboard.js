@@ -1,4 +1,5 @@
 import { state } from "/app/admin.js";
+import { fmtTime } from "/app/api.js";
 
 const HOUR_LABELS = [0, 4, 8, 12, 16, 20];
 
@@ -13,6 +14,38 @@ const hourLabel = (h) => (h === null || h === undefined ? "—" : `${String(h).p
 
 /** Always hand the renderers an array, whatever the API returned. */
 const arr = (v) => (Array.isArray(v) ? v : []);
+
+/** Donut / pie chart drawn with inline SVG. */
+function pie(rows, esc) {
+  const data = arr(rows).filter((r) => Number(r.count) > 0);
+  const total = data.reduce((sum, r) => sum + Number(r.count), 0);
+  if (!total) return `<p class="muted">No members added yet.</p>`;
+  const colors = ["#3b6ef0", "#2fbf8f", "#e0a33a", "#d9556f", "#8a6ef0", "#3aa8c1"];
+  const r = 54;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  const rings = data.map((row, i) => {
+    const frac = Number(row.count) / total;
+    const seg = `<circle r="${r}" cx="70" cy="70" fill="transparent"
+      stroke="${colors[i % colors.length]}" stroke-width="20"
+      stroke-dasharray="${(frac * c).toFixed(2)} ${c.toFixed(2)}"
+      stroke-dashoffset="${(-offset * c).toFixed(2)}"></circle>`;
+    offset += frac;
+    return seg;
+  }).join("");
+  const legend = data.map((row, i) => `<div class="legend-row">
+      <span class="legend-dot" style="background:${colors[i % colors.length]}"></span>
+      <span>${esc(row.name)}</span><strong>${row.count}</strong>
+      <span class="muted">${Math.round((row.count / total) * 100)}%</span>
+    </div>`).join("");
+  return `<div class="donut-wrap">
+    <svg viewBox="0 0 140 140" class="donut" role="img" aria-label="Member types">
+      <g transform="rotate(-90 70 70)">${rings}</g>
+      <text x="70" y="66" text-anchor="middle" class="donut-total">${total}</text>
+      <text x="70" y="84" text-anchor="middle" class="donut-cap">members</text>
+    </svg>
+    <div class="legend">${legend}</div></div>`;
+}
 
 /** Horizontal bar list used for gender / department / course breakdowns. */
 function barList(input, esc, emptyText) {
@@ -71,6 +104,7 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
       gender: arr(raw.gender),
       departments: arr(raw.departments),
       courses: arr(raw.courses),
+      memberMix: arr(raw.memberMix),
       trend: arr(raw.trend),
       hourly: arr(raw.hourly),
     };
@@ -125,7 +159,7 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
                         (r) => `<tr>
                           <td>${esc(r.full_name)}<br><span class="muted">${esc(r.member_code)}</span></td>
                           <td>${esc(r.department || "—")}</td>
-                          <td>${esc(String(r.entry_at).slice(11, 16))}</td>
+                          <td>${esc(fmtTime(r.entry_at))}</td>
                           <td>${mins(r.minutes)}</td></tr>`,
                       )
                       .join("")
@@ -135,6 +169,14 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
           </div>
         </div>
 
+        <div class="panel">
+          <h3>Members by type</h3>
+          <p class="muted">${d.members.total} total · ${d.members.active} active · ${d.members.expired} past validity</p>
+          <div style="margin-top:.6rem">${pie(d.memberMix, esc)}</div>
+        </div>
+      </div>
+
+      <div class="grid cols-2" style="margin-top:1rem">
         <div class="panel">
           <h3>Today by gender</h3>
           <div style="margin-top:.6rem">${barList(d.gender, esc, "No entries recorded today yet.")}</div>
