@@ -39,7 +39,7 @@
 The platform owner can now upgrade the entire application straight from the admin
 console:
 
-- Go to **Owner console → System settings → App upgrade**
+- Go to **Owner console → Application management → Update application**
 - Upload the new release **`.zip`** file
 - Click **Upgrade** — the app extracts, applies, and restarts itself automatically
 
