@@ -15,10 +15,17 @@ import { renderOwnerBilling } from "/app/pages/owner-billing.js";
 import { renderOwnerLeads } from "/app/pages/owner-leads.js";
 import { renderOwnerSettings } from "/app/pages/owner-settings.js";
 import { renderOwnerSite } from "/app/pages/owner-site.js";
+import { renderOwnerUpdate } from "/app/pages/owner-update.js";
 import { renderOwnerDocs, renderAdminDocs } from "/app/pages/docs.js";
 import { mountThemeToggle, mountTextSize, initAppearance } from "/app/theme.js";
+import { navIcon } from "/app/icons.js";
 
 export const state = { me: null, institutes: [], institute: null, access: null };
+
+// Never let the browser restore an old scroll position when switching pages —
+// otherwise returning to #settings can drop the view back onto the Appearance
+// panel instead of the top (Kiosk branding).
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
 /** True when the signed-in account may use a module in the active university. */
 export const can = (moduleKey) => {
@@ -54,6 +61,7 @@ const OWNER_PAGES = {
   leads: { title: "Leads (CRM)", subtitle: "Enquiries, follow-ups and conversions", render: renderOwnerLeads },
   provisioning: { title: "Provision access", subtitle: "Create universities and issue admin logins", render: renderInstitutes },
   website: { title: "Website", subtitle: "Public home & contact pages, branding and custom HTML/CSS", render: renderOwnerSite },
+  application: { title: "Application management", subtitle: "Update the application, database upgrades, version and restart", render: renderOwnerUpdate },
   platform: { title: "System settings", subtitle: "Company, invoicing, email and audit trail", render: renderOwnerSettings },
   docs: { title: "Documentation", subtitle: "Complete guide for the platform owner", render: renderOwnerDocs },
 };
@@ -94,12 +102,34 @@ function buildNav() {
   nav.innerHTML = "";
   for (const [key, page] of Object.entries(PAGES)) {
     const a = document.createElement("a");
-    a.textContent = page.title;
+    a.innerHTML = `${navIcon(key)}<span class="nav-label">${esc(page.title)}</span>`;
+    a.title = page.title;
     a.dataset.page = key;
     a.onclick = () => navigate(key);
     nav.appendChild(a);
   }
 }
+
+/** Collapse the sidebar to an icon rail; the choice is remembered per browser. */
+const COLLAPSE_KEY = "ler_nav_collapsed";
+function mountSidebarToggle() {
+  const btn = document.getElementById("navToggle");
+  if (!btn) return;
+  const paint = () => {
+    const on = document.body.classList.contains("nav-collapsed");
+    btn.textContent = on ? "»" : "«";
+    btn.title = on ? "Expand menu" : "Collapse menu";
+    btn.setAttribute("aria-label", btn.title);
+  };
+  document.body.classList.toggle("nav-collapsed", localStorage.getItem(COLLAPSE_KEY) === "1");
+  paint();
+  btn.onclick = () => {
+    const on = document.body.classList.toggle("nav-collapsed");
+    localStorage.setItem(COLLAPSE_KEY, on ? "1" : "0");
+    paint();
+  };
+}
+
 
 
 export function navigate(key) {
@@ -114,11 +144,17 @@ export function navigate(key) {
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("active", a.dataset.page === key);
   view.innerHTML = `<p class="muted">Loading…</p>`;
   // Always land at the top of the page so long lists don't keep the old scroll.
-  window.scrollTo(0, 0);
-  document.querySelector(".main")?.scrollTo(0, 0);
+  const toTop = () => {
+    window.scrollTo(0, 0);
+    document.querySelector(".main")?.scrollTo(0, 0);
+  };
+  toTop();
   Promise.resolve(page.render(view, ctx)).then(() => {
-    window.scrollTo({ top: 0, left: 0 });
-    document.querySelector(".main")?.scrollTo({ top: 0, left: 0 });
+    toTop();
+    // Defer one frame so the new content's layout is final and any browser
+    // scroll restoration has already been overridden — guarantees the view
+    // starts at Kiosk branding, not partway down at Appearance.
+    requestAnimationFrame(() => requestAnimationFrame(toTop));
   }).catch((e) => {
     view.innerHTML = `<div class="panel"><p style="color:var(--danger)">${esc(e.message)}</p></div>`;
   });
@@ -171,6 +207,7 @@ async function boot() {
   };
 
   initAppearance();
+  mountSidebarToggle();
   mountThemeToggle(document.getElementById("themeToggle"));
   mountTextSize(document.getElementById("textSize"));
 

@@ -11,14 +11,18 @@
   <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
   <div class="shell">
     <aside class="side">
-      <h3 style="margin:0">Entry & Exit Register</h3>
-      <p class="muted" id="whoami">Loading…</p>
-      <label for="instituteSelect">University</label>
-      <select id="instituteSelect" style="width:100%"></select>
+      <div class="side-head">
+        <h3 class="side-title" style="margin:0">Entry & Exit Register</h3>
+        <button class="ghost nav-toggle" id="navToggle" type="button">«</button>
+      </div>
+      <p class="muted side-hide" id="whoami">Loading…</p>
+      <label class="side-hide" for="instituteSelect">University</label>
+      <select id="instituteSelect" class="side-hide" style="width:100%"></select>
       <nav id="nav"></nav>
-      <button class="ghost theme-toggle" id="themeToggle"></button>
+      <button class="ghost theme-toggle side-hide" id="themeToggle"></button>
 
-      <button class="ghost" id="signout" style="width:100%;margin-top:1rem">Sign out</button>
+      <button class="ghost side-hide" id="signout" style="width:100%;margin-top:1rem">Sign out</button>
+
     </aside>
     <main class="main">
       <div class="topbar">

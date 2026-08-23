@@ -144,3 +144,20 @@ code to `POST /api/public/scan-event` with the university's kiosk key.
 - The owner is a business role with no access to members, scans or reports.
 - External scan calls need the kiosk key; browser kiosk pages are same-origin.
 - Expired or suspended subscriptions block admin access and kiosk scans.
+
+## Application management (Update Application)
+
+**Owner menu → Application management**
+
+1. **Application version** – installed version, Node.js version, uptime and how many database migrations have run.
+2. **Update application** – choose the new version's ZIP file, optionally **Validate package**, then **Upload & upgrade**. The package must contain `package.json` and `src/server.js`; SQL upgrade scripts go in a `db` folder inside the ZIP.
+   * A copy of the current application is saved to `backups/app-<timestamp>/` and the whole database to `backups/db-<timestamp>.json` **before** anything is replaced.
+   * `.env`, `node_modules/`, `backups/`, `uploads/`, `logs/` and `public/photos/` are never overwritten.
+   * Every step (validation, backup, extraction, migration) is shown on screen.
+   * If any step fails, the application files are rolled back automatically and the failure is reported.
+3. **Database upgrade status** – each `db/*.sql` script runs once, in filename order, and is recorded in `schema_migrations`, so re-uploading the same package never re-runs it. Failures are listed with the error text.
+4. **Restart application** – stops the process and starts the new version, then waits for the app to answer and reloads the console. Start the app with `start.bat` (Windows) or `start-loop.sh` (Linux/macOS) — or a supervisor such as pm2 — so the restart brings it back automatically.
+5. **Recovery** – restore any earlier application backup from the list, then restart.
+6. **Update history** – date, package name, from/to version, migrations applied, status and who ran it. Update actions are also written to the platform audit trail.
+
+Only the platform owner can open these endpoints; every request is checked server-side.

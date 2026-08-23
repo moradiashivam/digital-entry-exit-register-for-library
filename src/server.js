@@ -16,6 +16,7 @@ import ownerRoutes from "./routes/owner.routes.js";
 import userRoutes from "./routes/users.routes.js";
 import sip2Routes from "./routes/sip2.routes.js";
 import backupRoutes from "./routes/backup.routes.js";
+import updateRoutes from "./routes/update.routes.js";
 import { startScheduler } from "./jobs.js";
 
 
@@ -23,7 +24,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "220mb" }));
 app.use(loadUser);
 
 app.get("/api/health", async (_req, res) => {
@@ -46,6 +47,7 @@ app.use("/api/owner", ownerRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/sip2", sip2Routes);
 app.use("/api/backup", backupRoutes);
+app.use("/api/update", updateRoutes);
 
 
 app.use(express.static(path.join(__dirname, "..", "public")));
@@ -57,11 +59,16 @@ app.get("/login", (_req, res) => res.sendFile(path.join(__dirname, "..", "public
 app.get("/contact", (_req, res) => res.sendFile(path.join(__dirname, "..", "public", "contact.html")));
 app.get("/admin", (_req, res) => res.sendFile(path.join(__dirname, "..", "public", "admin.html")));
 
+// Unknown API paths must answer JSON, never Express' HTML 404 page.
+app.use("/api", (_req, res) => res.status(404).json({ error: "Unknown API endpoint. Restart the server if you just updated the application." }));
+
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: err.message || "Server error" });
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: err.message || "Server error" });
 });
+
 
 await ensureSchemaExtras().catch((e) => console.error("Schema upgrade skipped:", e.message));
 startScheduler();

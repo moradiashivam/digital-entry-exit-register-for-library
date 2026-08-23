@@ -141,3 +141,33 @@ CREATE TABLE IF NOT EXISTS sip2_settings (
   last_test_message VARCHAR(255) NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+;
+
+-- Application update history (owner module → Application management)
+CREATE TABLE IF NOT EXISTS app_updates (
+  id CHAR(36) PRIMARY KEY,
+  filename VARCHAR(255) NOT NULL,
+  from_version VARCHAR(40) NULL,
+  to_version VARCHAR(40) NULL,
+  status ENUM('Running','Success','Failed','Rolled back') NOT NULL DEFAULT 'Running',
+  migrations_applied INT NOT NULL DEFAULT 0,
+  app_backup_path VARCHAR(500) NULL,
+  db_backup_path VARCHAR(500) NULL,
+  error VARCHAR(500) NULL,
+  log JSON NULL,
+  started_by VARCHAR(190) NULL,
+  started_at DATETIME NOT NULL,
+  finished_at DATETIME NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Which migration scripts have already run (never applied twice)
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id CHAR(36) PRIMARY KEY,
+  filename VARCHAR(255) NOT NULL,
+  checksum CHAR(64) NULL,
+  update_id CHAR(36) NULL,
+  status ENUM('Success','Failed') NOT NULL DEFAULT 'Success',
+  error VARCHAR(500) NULL,
+  applied_at DATETIME NOT NULL,
+  KEY idx_migration_file (filename)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

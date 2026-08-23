@@ -21,7 +21,18 @@ export async function api(url, { method = "GET", body, institute } = {}) {
 
   const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // The server answered with HTML (404 page, proxy error, crash page).
+      if (res.status === 404) {
+        throw new Error(`Endpoint ${url} was not found — restart the application server so new routes load.`);
+      }
+      throw new Error(`Unexpected response from ${url} (HTTP ${res.status}). Check the server console.`);
+    }
+  }
   if (res.status === 401 && !url.includes("/auth/login")) {
     clearToken();
     location.href = "/login";
@@ -29,6 +40,7 @@ export async function api(url, { method = "GET", body, institute } = {}) {
   }
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
+
 }
 
 export function toast(message, isError = false) {

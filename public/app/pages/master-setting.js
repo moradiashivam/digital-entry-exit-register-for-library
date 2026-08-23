@@ -2,7 +2,10 @@
  * Master Setting — sublibraries, sublibrary users and their permissions.
  * Only the University Administrator of the active university can open this page.
  */
+import { kiosksPanel, hoursPanel, staffPanel, backupPanel, sip2Panel } from "/app/pages/admin-sections.js";
+
 const arr = (v) => (Array.isArray(v) ? v : []);
+
 
 export async function renderMasterSetting(view, { api, esc, toast }) {
   let meta = { modules: [], roles: [], sublibraries: [], kiosks: [], locations: [] };
@@ -32,7 +35,7 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
     return `
       <div class="panel">
         <div class="panel-head">
-          <h3 style="margin:0">${u ? `Edit ${esc(u.full_name || u.email)}` : "Add sublibrary user"}</h3>
+          <h3 style="margin:0">${u ? `Edit ${esc(u.full_name || u.email)}` : "Add User"}</h3>
           <p class="muted">Choose a role, then fine-tune the modules, kiosks and download rights.</p>
         </div>
 
@@ -173,10 +176,24 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
               </select></td></tr>`).join("") || `<tr><td colspan="4" class="muted">No kiosks yet.</td></tr>`}
           </tbody>
         </table>
-      </div>`;
+      </div>
+
+      <div id="ms_kiosks" style="margin-top:1rem"></div>
+      <div id="ms_hours" style="margin-top:1rem"></div>
+      <div id="ms_sip2" style="margin-top:1rem"></div>
+      <div id="ms_staff" style="margin-top:1rem"></div>
+      <div id="ms_backup" style="margin-top:1rem"></div>`;
 
     bind();
+
+    const ctx = { api, esc, toast };
+    kiosksPanel(view.querySelector("#ms_kiosks"), ctx);
+    hoursPanel(view.querySelector("#ms_hours"), ctx);
+    sip2Panel(view.querySelector("#ms_sip2"), ctx);
+    staffPanel(view.querySelector("#ms_staff"), ctx);
+    backupPanel(view.querySelector("#ms_backup"), ctx);
   };
+
 
   const collect = () => ({
     full_name: view.querySelector("#f_name").value.trim(),
