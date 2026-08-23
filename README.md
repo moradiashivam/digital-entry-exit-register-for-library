@@ -1,18 +1,57 @@
-# Library Entry & Exit Register — MySQL Edition
+# 📚 Library Entry & Exit Register — MySQL Edition
 
-A **self-hosted, multi-tenant university library register** that runs entirely on
-**MySQL + Node.js** — no cloud dependency, no recurring fees. Every university gets
-its own isolated campus with members, kiosk, reports and audit trail, managed by a
-single platform owner.
+<p align="center">
+  <img src="Photos/Kiosk.png" alt="Kiosk Screen" width="600"/>
+</p>
 
-Built around palm-vein biometric capture, RFID cards and manual entry, with a public
-marketing website, lead-generation contact form and a live occupancy dashboard.
+<p align="center">
+  <a href="https://github.com/moradiashivam/digital-entry-exit-register-for-library/stargazers">
+    <img src="https://img.shields.io/github/stars/moradiashivam/digital-entry-exit-register-for-library?style=for-the-badge&color=yellow" alt="GitHub stars"/>
+  </a>
+  <a href="https://github.com/moradiashivam/digital-entry-exit-register-for-library/network/members">
+    <img src="https://img.shields.io/github/forks/moradiashivam/digital-entry-exit-register-for-library?style=for-the-badge&color=blue" alt="GitHub forks"/>
+  </a>
+  <a href="https://github.com/moradiashivam/digital-entry-exit-register-for-library/releases/latest">
+    <img src="https://img.shields.io/github/v/release/moradiashivam/digital-entry-exit-register-for-library?style=for-the-badge&color=brightgreen" alt="Latest release"/>
+  </a>
+  <a href="https://github.com/moradiashivam/digital-entry-exit-register-for-library/issues">
+    <img src="https://img.shields.io/github/issues/moradiashivam/digital-entry-exit-register-for-library?style=for-the-badge&color=orange" alt="Open issues"/>
+  </a>
+</p>
+
+<p align="center">
+  <b>A self-hosted, multi-tenant university library register</b><br/>
+  running entirely on <b>MySQL + Node.js</b> — no cloud dependency, no recurring fees.
+</p>
+
+<p align="center">
+  ⭐ <b>If this project helps your library, please star the repo — it really helps!</b> ⭐
+</p>
+
+---
+
+## ✨ What's new
+
+> 📦 **Latest release: [v3.0.0](https://github.com/moradiashivam/digital-entry-exit-register-for-library/releases/tag/v3.0.0)** — see the [full release history](https://github.com/moradiashivam/digital-entry-exit-register-for-library/releases) for every version and changelog.
+
+**🆕 One-click app upgrade — no command line needed**
+
+The platform owner can now upgrade the entire application straight from the admin
+console:
+
+- Go to **Owner console → System settings → App upgrade**
+- Upload the new release **`.zip`** file
+- Click **Upgrade** — the app extracts, applies, and restarts itself automatically
+
+No terminal, no `git pull`, no `npm install` typed by hand. Just download the release
+zip from the [Releases page](https://github.com/moradiashivam/digital-entry-exit-register-for-library/releases), upload it, and you're done.
 
 ---
 
 ## Table of contents
 
 - [Features at a glance](#features-at-a-glance)
+- [Screenshots](#-screenshots)
 - [Public website](#public-website)
 - [System requirements](#system-requirements)
 - [Quick start (Windows)](#quick-start-windows)
@@ -32,7 +71,7 @@ marketing website, lead-generation contact form and a live occupancy dashboard.
 
 ## Features at a glance
 
-**Platform owner console**
+**🏢 Platform owner console**
 
 - Overview dashboard with key metrics across all universities
 - Create universities, set subscription windows (active / suspended / expired)
@@ -40,8 +79,9 @@ marketing website, lead-generation contact form and a live occupancy dashboard.
 - Billing, subscription history, payment tracking
 - CRM — leads captured from the public **Contact us** page
 - System settings, SMTP configuration, website/branding customisation
+- **🆕 One-click app upgrade** — upload a release zip and update the whole app, no CLI required
 
-**University admin panel**
+**🎓 University admin panel**
 
 - Members CRUD with photo, RFID UID, course / department / year
 - Master data — courses, departments, academic years (dedicated page)
@@ -53,7 +93,7 @@ marketing website, lead-generation contact form and a live occupancy dashboard.
 - Kiosk branding — logo, colour mode, custom CSS
 - Appearance — light/dark mode toggle (light is the default)
 
-**Kiosk screen (per university)**
+**🖥️ Kiosk screen (per university)**
 
 - Palm, RFID or manual entry tabs
 - Student photo displayed on successful entry/exit
@@ -62,11 +102,28 @@ marketing website, lead-generation contact form and a live occupancy dashboard.
   admin can still log in to view metrics
 - Reachable at `http://<server>:4000/kiosk/<institute-slug>`
 
-**Scan API (for the C++ bridge)**
+**🔌 Scan API (for the C++ bridge)**
 
 - Single endpoint, secured with a per-institute kiosk key
 - 1:N matching support via enrolled palm templates
 - Returns member identity, action (Entry/Exit) and photo URL
+
+---
+
+## 📸 Screenshots
+
+<table>
+  <tr>
+    <td align="center"><b>Kiosk screen</b></td>
+    <td align="center"><b>Owner-side admin</b></td>
+    <td align="center"><b>University admin</b></td>
+  </tr>
+  <tr>
+    <td><img src="Photos/Kiosk.png" alt="Kiosk screen" width="280"/></td>
+    <td><img src="Photos/Ownerphoto.png" alt="Owner-side admin" width="280"/></td>
+    <td><img src="Photos/UniversityAdmin.png" alt="University admin" width="280"/></td>
+  </tr>
+</table>
 
 ---
 
@@ -126,7 +183,7 @@ cd mysql-app
 cp .env.example .env    # then edit it (see below)
 npm install
 npm run setup           # creates database, tables and owner account
-npm start               # serves on http://localhost:4000
+npm start                # serves on http://localhost:4000
 ```
 
 For development with auto-reload on file changes:
@@ -237,13 +294,13 @@ a subscription at any time.
 
 ## Backups & upgrades
 
-Backup:
+**Database backup:**
 
 ```bash
 mysqldump -u root -p library_register > backup-YYYYMMDD.sql
 ```
 
-Restore:
+**Database restore:**
 
 ```bash
 mysql -u root -p library_register < backup-YYYYMMDD.sql
@@ -252,6 +309,17 @@ mysql -u root -p library_register < backup-YYYYMMDD.sql
 The server auto-applies schema additions (new columns like `kiosk_settings.theme`,
 `kiosk_settings.custom_css`, etc.) on startup, so existing databases upgrade with no
 manual migration — just restart `start.bat` / `npm start` after updating the code.
+
+**🆕 App upgrade — no command line required:**
+
+Starting with the latest release, the platform owner can upgrade the whole app from
+the browser:
+
+1. Download the newest release zip from the [Releases page](https://github.com/moradiashivam/digital-entry-exit-register-for-library/releases).
+2. Sign in as the platform owner and open **System settings → App upgrade**.
+3. Upload the zip file and click **Upgrade**.
+4. The app extracts the new files, applies any schema changes, and restarts itself —
+   no terminal, `git pull`, or `npm install` needed.
 
 ---
 
@@ -338,4 +406,7 @@ commercial licensing questions via the public [Contact us](public/contact.html) 
 
 ---
 
-*For installation help, see the [Documentation & installation page](public/docs.html).*
+<p align="center">
+  ⭐ <b>Found this useful? Give it a star on GitHub — it helps others discover the project!</b> ⭐<br/>
+  <i>For installation help, see the <a href="public/docs.html">Documentation & installation page</a>.</i>
+</p>
