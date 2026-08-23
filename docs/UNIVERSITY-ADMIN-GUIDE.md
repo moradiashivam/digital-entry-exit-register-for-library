@@ -107,3 +107,52 @@ Occupancy pairs entries and exits over a 48-hour window so overnight visits are 
 | Custom CSS not visible | Save again, then `Ctrl+F5` on the kiosk |
 | Import rows rejected | Missing master data value or wrong date format |
 | Empty charts | No scans recorded yet for that day |
+
+## Master Setting — sublibrary users, permissions and multi-kiosk rules
+
+**Where:** sidebar → **Master setting** (visible only to the University Administrator).
+
+### Libraries (sublibraries)
+Create one entry per library building/branch, then map each kiosk to a library in
+the *Kiosk → library mapping* table. Dashboards, reports and user access can then
+be filtered library-wise.
+
+### Sublibrary users
+Add a user with name, email and password, then choose:
+
+- **Role** — University administrator, Library manager, Sublibrary administrator,
+  Kiosk operator, Report viewer or Viewer only. Picking a role pre-fills the
+  recommended permissions; you can change any of them afterwards.
+- **Module-wise permission** — dashboard, members, entry/exit register, reports,
+  kiosk settings, master data, master setting, audit trail. Hidden modules
+  disappear from the menu and are refused by the server.
+- **Rights** — *Viewer only* (no add/edit/delete anywhere), *Allow bulk upload*
+  and *Allow download / export*.
+- **Library, location and kiosk access** — tick the kiosks (or libraries /
+  locations) the user may work with. Their dashboard, register, reports and kiosk
+  list then show those terminals only. Leave the kiosk list empty to allow all.
+
+Users can be edited, deactivated (cannot sign in), have their password reset, or be
+removed from the university. The University Administrator always keeps full access
+and cannot be edited or removed from this screen.
+
+### Dashboard filters
+The dashboard has a **Library / Location / Kiosk** filter bar. Occupancy, today's
+counts, hourly footfall, the 14-day trend and latest scans all follow the filter,
+within whatever the account is allowed to see.
+
+### Multi-kiosk entry, exit and transfer
+A member may only have one open visit at a time (complete-transaction principle).
+
+- Scanning at the **same** kiosk toggles Entry → Exit as usual.
+- Scanning at a **different** kiosk while a visit is still open:
+  - **Automatic transfer ON** (Settings → Kiosk branding → *Automatic transfer
+    between kiosks*): the previous visit is closed at the old kiosk with method
+    `Transfer` and a new Entry is written at the new kiosk — one scan, no manual
+    exit needed.
+  - **Automatic transfer OFF**: the scan is refused with
+    "Please scan out at *<kiosk>* before entering here", and the attempt is logged.
+
+### Transaction history
+Reports → **Transaction history (multi-kiosk)** lists every scan of a member with
+its kiosk, library, location and method, so transfers are fully traceable.

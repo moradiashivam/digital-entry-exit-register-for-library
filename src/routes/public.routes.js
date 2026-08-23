@@ -11,6 +11,12 @@ router.get("/kiosk/:slug", async (req, res) => {
   const inst = await one("SELECT id, name, slug, status, subscription_start, subscription_end FROM institutes WHERE slug = ?", [req.params.slug]);
   if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
   const settings = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [inst.id]);
+  const devices = await q(
+    "SELECT device_id, name, location FROM kiosk_devices WHERE institute_id = ? AND is_active = 1 ORDER BY name",
+    [inst.id],
+  );
+  const wanted = String(req.query.device || "").trim();
+  const device = devices.find((d) => d.device_id === wanted) || devices[0] || null;
   res.json({
     institute: { id: inst.id, name: inst.name, slug: inst.slug },
     subscription_active: kioskEnabled(inst),
@@ -18,8 +24,11 @@ router.get("/kiosk/:slug", async (req, res) => {
       ? null
       : (inst.status && inst.status !== "Active" ? "suspended" : "expired"),
     settings: settings ?? { institution_name: inst.name },
+    devices,
+    device,
   });
 });
+
 
 async function recordFailure(instituteId, deviceId, code, reason, method) {
   await q(
@@ -164,20 +173,51 @@ router.post("/scan-event", async (req, res) => {
   const recordedAt = localDateTime();
   const windowStart = localDateTime(new Date(Date.now() - 48 * 60 * 60 * 1000));
   const last = await one(
-    `SELECT action FROM entry_exit_logs WHERE member_id = ? AND occurred_at >= ?
+    `SELECT action, device_id FROM entry_exit_logs WHERE member_id = ? AND occurred_at >= ?
      ORDER BY occurred_at DESC LIMIT 1`, [member.id, windowStart]);
-  const action = last?.action === "Entry" ? "Exit" : "Entry";
 
-  await q(
+  const writeLog = (act, meth, dev) => q(
     `INSERT INTO entry_exit_logs (id, institute_id, member_id, action, method, device_id, matched_confidence, occurred_at)
      VALUES (?,?,?,?,?,?,?,?)`,
-    [uuid(), inst.id, member.id, action, method, deviceId,
+    [uuid(), inst.id, member.id, act, meth, dev,
      body.confidence != null ? Number(body.confidence) : null, recordedAt],
   );
+
+  const openElsewhere = last?.action === "Entry" && last.device_id && last.device_id !== deviceId;
+  let transferredFrom = null;
+
+  if (openElsewhere) {
+    // Multi-kiosk rule: a visit opened at one terminal must be completed before a
+    // new one starts. With automatic transfer on, we close it here and re-open at
+    // this kiosk in a single scan; with it off, the member must exit where they entered.
+    const cfg = await one("SELECT multi_kiosk_transfer FROM kiosk_settings WHERE institute_id = ?", [inst.id]);
+    const allowTransfer = cfg ? Number(cfg.multi_kiosk_transfer) !== 0 : true;
+    const prev = await one(
+      "SELECT name FROM kiosk_devices WHERE institute_id = ? AND device_id = ?",
+      [inst.id, last.device_id],
+    );
+    const prevName = prev?.name || last.device_id;
+    if (!allowTransfer) {
+      await recordFailure(inst.id, deviceId, member.member_code, `Open visit at ${prevName}`, method);
+      return res.status(409).json({
+        status: "rejected",
+        reason: "open_at_other_kiosk",
+        member_name: member.full_name,
+        member_code: member.member_code,
+        message: `Please scan out at ${prevName} before entering here`,
+      });
+    }
+    await writeLog("Exit", "Transfer", last.device_id);
+    transferredFrom = prevName;
+  }
+
+  const action = !openElsewhere && last?.action === "Entry" ? "Exit" : "Entry";
+  await writeLog(action, method, deviceId);
 
   res.json({
     status: "ok",
     action,
+    transferred_from: transferredFrom,
     member: {
       id: member.id,
       member_code: member.member_code,

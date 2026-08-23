@@ -12,16 +12,43 @@
 }
 
 * { box-sizing: border-box; }
+/* Text size control: A / A+ / A++ / A+++ scale every rem-based size. */
+html { font-size: calc(15px * var(--text-scale, 1)); }
 body {
   margin: 0;
   background: radial-gradient(1200px 600px at 20% -10%, #1c2748 0%, var(--bg) 60%);
   color: var(--text);
-  font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  font: 1rem/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
   min-height: 100vh;
 }
 a { color: var(--brand); }
 h1, h2, h3 { margin: 0 0 .4rem; font-weight: 650; letter-spacing: -.01em; }
-.muted { color: var(--muted); font-size: .88rem; }
+.muted { color: var(--muted); font-size: .9rem; }
+
+/* Text size switcher */
+.textsize { display: flex; gap: .3rem; margin-top: .8rem; }
+.textsize button {
+  flex: 1; padding: .4rem .2rem; font-weight: 700; line-height: 1;
+  background: transparent; border: 1px solid var(--line); color: var(--text);
+}
+.textsize button:nth-child(1) { font-size: .8rem; }
+.textsize button:nth-child(2) { font-size: .95rem; }
+.textsize button:nth-child(3) { font-size: 1.1rem; }
+.textsize button:nth-child(4) { font-size: 1.25rem; }
+.textsize button.active { background: var(--brand); color: #fff; border-color: transparent; }
+
+/* Inline text-size switcher, parallel to the page title in the topbar */
+.topbar-title { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+.textsize-inline { margin: 0; }
+.textsize-inline button {
+  flex: none; min-width: 34px; padding: .3rem .5rem; border-radius: 9px;
+}
+.textsize-inline button.ghost,
+.textsize-inline button { background: transparent; border: 1px solid var(--line); }
+.textsize-inline button:hover { background: var(--line); }
+body.light .textsize-inline button { background: #eef2fb; border-color: #c2cee6; color: #1d2740; }
+body.light .textsize-inline button:hover { background: #e0e8fa; }
+
 
 .panel {
   background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);

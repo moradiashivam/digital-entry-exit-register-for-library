@@ -47,4 +47,53 @@ export function applyAccent(id) {
 export function initAppearance() {
   applyTheme(getTheme());
   applyAccent(getAccent());
+  applyTextSize(getTextSize());
+}
+
+
+/* ---------- text size (A / A+ / A++ / A+++) ---------- */
+
+const TEXT_KEY = "ler_textscale";
+
+export const TEXT_SIZES = [
+  { id: "a", label: "A", scale: 1 },
+  { id: "a1", label: "A+", scale: 1.12 },
+  { id: "a2", label: "A++", scale: 1.26 },
+  { id: "a3", label: "A+++", scale: 1.42 },
+];
+
+export const getTextSize = () =>
+  TEXT_SIZES.find((t) => t.id === localStorage.getItem(TEXT_KEY))?.id ?? "a";
+
+export function applyTextSize(id) {
+  const t = TEXT_SIZES.find((x) => x.id === id) ?? TEXT_SIZES[0];
+  document.documentElement.style.setProperty("--text-scale", String(t.scale));
+  localStorage.setItem(TEXT_KEY, t.id);
+}
+
+/** Render the A / A+ / A++ / A+++ buttons inside `host`. */
+export function mountTextSize(host) {
+  if (!host) return;
+  host.classList.add("textsize");
+  host.innerHTML = "";
+  const paint = () => {
+    const cur = getTextSize();
+    for (const b of host.children) b.classList.toggle("active", b.dataset.size === cur);
+  };
+  for (const t of TEXT_SIZES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost";
+    b.dataset.size = t.id;
+    b.textContent = t.label;
+    b.title = `Text size ${t.label}`;
+    b.setAttribute("aria-label", `Text size ${t.label}`);
+    b.onclick = () => {
+      applyTextSize(t.id);
+      paint();
+    };
+    host.appendChild(b);
+  }
+  applyTextSize(getTextSize());
+  paint();
 }

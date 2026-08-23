@@ -90,8 +90,59 @@ function columnChart(input, { xLabel, axisEvery = 1 }) {
 }
 
 export async function renderDashboard(view, { api, esc, fmtDate }) {
+  // Library / kiosk filter — a sublibrary user only ever sees their own terminals.
+  const filters = { sublibrary_id: "", location: "", device_id: "" };
+  let choices = { kiosks: [], sublibraries: [], locations: [] };
+  try {
+    choices = (await api("/api/reports/filters")) || choices;
+  } catch {
+    /* filters stay empty if the endpoint is unavailable */
+  }
+
+  const query = () => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    const s = p.toString();
+    return s ? `?${s}` : "";
+  };
+
+  const filterBar = () => `
+    <div class="panel row" style="gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:.8rem">
+      <label style="min-width:190px">Library
+        <select id="fltLib">
+          <option value="">All libraries</option>
+          ${arr(choices.sublibraries).map((s) => `<option value="${esc(s.id)}" ${filters.sublibrary_id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+        </select></label>
+      <label style="min-width:190px">Location
+        <select id="fltLoc">
+          <option value="">All locations</option>
+          ${arr(choices.locations).map((l) => `<option value="${esc(l)}" ${filters.location === l ? "selected" : ""}>${esc(l)}</option>`).join("")}
+        </select></label>
+      <label style="min-width:190px">Kiosk
+        <select id="fltKiosk">
+          <option value="">All kiosks</option>
+          ${arr(choices.kiosks).map((k) => `<option value="${esc(k.device_id)}" ${filters.device_id === k.device_id ? "selected" : ""}>${esc(k.name)}</option>`).join("")}
+        </select></label>
+      <button id="fltClear" class="ghost">Clear filters</button>
+    </div>`;
+
+  const bindFilters = () => {
+    const wire = (id, key) => {
+      const el = view.querySelector(id);
+      if (el) el.onchange = () => { filters[key] = el.value; paint().catch(() => {}); };
+    };
+    wire("#fltLib", "sublibrary_id");
+    wire("#fltLoc", "location");
+    wire("#fltKiosk", "device_id");
+    const clear = view.querySelector("#fltClear");
+    if (clear) clear.onclick = () => {
+      filters.sublibrary_id = filters.location = filters.device_id = "";
+      paint().catch(() => {});
+    };
+  };
+
   const paint = async () => {
-    const raw = (await api("/api/reports/dashboard")) || {};
+    const raw = (await api(`/api/reports/dashboard${query()}`)) || {};
     const d = {
       institute: raw.institute || null,
       members: { total: 0, active: 0, expired: 0, ...(raw.members || {}) },
@@ -132,6 +183,7 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
 
 
     view.innerHTML = `
+      ${filterBar()}
       <p class="muted live-line"><span class="live-dot"></span>
         ${esc(name)} · ${d.members.active} active members · updates automatically as people scan</p>
 
@@ -223,6 +275,8 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
           }</tbody>
         </table>
       </div>`;
+
+    bindFilters();
   };
 
   await paint();

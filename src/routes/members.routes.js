@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { q, one, uuid, today, plusYear } from "../db.js";
 import { requireAuth, withInstitute, canViewReports, logAudit } from "../auth.js";
+import { requireModule, requireWrite, requireBulk } from "../access.js";
 import { savePhoto, deletePhoto } from "../photos.js";
 
 const router = Router();
@@ -45,7 +46,7 @@ export function normalizeDate(value) {
 }
 
 /** List / search members of the active university. */
-router.get("/", withInstitute(canViewReports), async (req, res) => {
+router.get("/", withInstitute(canViewReports), requireModule("members"), async (req, res) => {
   const search = `%${String(req.query.search || "").trim()}%`;
   const status = req.query.status;
   const params = [req.institute.id, search, search, search];
@@ -84,7 +85,7 @@ function validate(body) {
 }
 
 
-router.post("/", withInstitute(), async (req, res) => {
+router.post("/", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const error = validate(req.body || {});
   if (error) return res.status(400).json({ error });
   const id = uuid();
@@ -100,10 +101,10 @@ router.post("/", withInstitute(), async (req, res) => {
   try {
     await q(
       `INSERT INTO members (id, institute_id, member_code, full_name, course_id, department_id, academic_year_id,
-        gender, mobile, email, photo_url, rfid_uid, valid_from, valid_to, status, source, consent_given)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        gender, designation, mobile, email, photo_url, rfid_uid, valid_from, valid_to, status, source, consent_given)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [id, req.institute.id, b.member_code.trim(), b.full_name.trim(), clean(b.course_id), clean(b.department_id),
-       clean(b.academic_year_id), b.gender || "Other", clean(String(b.mobile ?? "").trim()),
+       clean(b.academic_year_id), b.gender || "Other", clean(b.designation) || "Student", clean(String(b.mobile ?? "").trim()),
        clean(String(b.email ?? "").trim()), photoUrl,
        clean(b.rfid_uid), normalizeDate(b.valid_from) || today(), normalizeDate(b.valid_to) || plusYear(), b.status || "Active",
        b.source || "manual", b.consent_given ? 1 : 0],
@@ -116,14 +117,14 @@ router.post("/", withInstitute(), async (req, res) => {
   res.status(201).json(await one("SELECT * FROM members WHERE id = ?", [id]));
 });
 
-router.patch("/:id", withInstitute(), async (req, res) => {
+router.patch("/:id", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const member = await one("SELECT * FROM members WHERE id = ? AND institute_id = ?", [req.params.id, req.institute.id]);
   if (!member) return res.status(404).json({ error: "Member not found" });
   const merged = { ...member, ...req.body };
   const error = validate(merged);
   if (error) return res.status(400).json({ error });
 
-  const allowed = ["member_code", "full_name", "course_id", "department_id", "academic_year_id", "gender",
+  const allowed = ["member_code", "full_name", "course_id", "department_id", "academic_year_id", "gender", "designation",
     "mobile", "email", "photo_url", "rfid_uid", "valid_from", "valid_to", "status", "consent_given"];
   const patch = {};
   if (req.body?.photo_data) {
@@ -149,7 +150,7 @@ router.patch("/:id", withInstitute(), async (req, res) => {
   res.json(await one("SELECT * FROM members WHERE id = ?", [member.id]));
 });
 
-router.delete("/:id", withInstitute(), async (req, res) => {
+router.delete("/:id", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   await q("DELETE FROM members WHERE id = ? AND institute_id = ?", [req.params.id, req.institute.id]);
   await logAudit(req, req.institute.id, "member.delete", "members", req.params.id, null);
   res.json({ ok: true });
@@ -160,7 +161,7 @@ router.delete("/:id", withInstitute(), async (req, res) => {
  * The CSV only carries the per-member columns; course / department / academic year /
  * photo and consent come from `defaults` chosen in the import screen and apply to every row.
  */
-router.post("/bulk", withInstitute(), async (req, res) => {
+router.post("/bulk", withInstitute(), requireModule("members"), requireWrite, requireBulk, async (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
   const fileName = String(req.body?.file_name || "import.csv");
   const d = req.body?.defaults || {};
@@ -183,6 +184,7 @@ router.post("/bulk", withInstitute(), async (req, res) => {
       department_id: clean(d.department_id),
       academic_year_id: clean(d.academic_year_id),
       gender: row.gender || d.gender || "Other",
+      designation: clean(row.designation) || clean(d.designation) || "Student",
       mobile: clean(String(row.mobile ?? "").trim()),
       email: clean(String(row.email ?? "").trim()),
       rfid_uid: clean(row.rfid_uid),
@@ -210,11 +212,11 @@ router.post("/bulk", withInstitute(), async (req, res) => {
       }
       await q(
         `INSERT INTO members (id, institute_id, member_code, full_name, course_id, department_id,
-           academic_year_id, gender, mobile, email, photo_url, rfid_uid, valid_from, valid_to,
+           academic_year_id, gender, designation, mobile, email, photo_url, rfid_uid, valid_from, valid_to,
            status, source, consent_given, import_batch_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'excel_import', ?, ?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'excel_import', ?, ?)`,
         [uuid(), req.institute.id, code, values.full_name, values.course_id, values.department_id,
-         values.academic_year_id, values.gender, values.mobile, values.email, clean(d.photo_url),
+         values.academic_year_id, values.gender, values.designation, values.mobile, values.email, clean(d.photo_url),
          values.rfid_uid, values.valid_from, values.valid_to, values.status, values.consent_given, batchId],
       );
       created += 1;
@@ -245,7 +247,7 @@ router.post("/bulk", withInstitute(), async (req, res) => {
 /**
  * Bulk delete members by id. Permanent — scan history and palm templates cascade away.
  */
-router.post("/bulk-delete", withInstitute(), async (req, res) => {
+router.post("/bulk-delete", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).filter(Boolean);
   if (!ids.length) return res.status(400).json({ error: "Select at least one member" });
   const placeholders = ids.map(() => "?").join(",");
@@ -269,7 +271,7 @@ router.post("/bulk-delete", withInstitute(), async (req, res) => {
  * Delete every member created by one CSV import batch (undo a wrong upload).
  * Members updated by an overwrite import are NOT removed — only rows this batch created.
  */
-router.delete("/import/:batchId", withInstitute(), async (req, res) => {
+router.delete("/import/:batchId", withInstitute(), requireModule("members"), requireWrite, requireBulk, async (req, res) => {
   const log = await one(
     "SELECT * FROM bulk_import_logs WHERE id = ? AND institute_id = ?",
     [req.params.batchId, req.institute.id],
@@ -293,7 +295,7 @@ router.delete("/import/:batchId", withInstitute(), async (req, res) => {
 
 
 /** Upload one photo (base64) and attach it to the member with that code. */
-router.post("/photo", withInstitute(), async (req, res) => {
+router.post("/photo", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const code = String(req.body?.member_code || "").trim();
   if (!code) return res.status(400).json({ error: "Member code is required" });
   let url;
@@ -310,7 +312,7 @@ router.post("/photo", withInstitute(), async (req, res) => {
  * Bulk photo upload: each file is named <member_code>.jpg. Photos are written to
  * public/photos/<university>/ and linked to the matching member record.
  */
-router.post("/photos/bulk", withInstitute(), async (req, res) => {
+router.post("/photos/bulk", withInstitute(), requireModule("members"), requireWrite, requireBulk, async (req, res) => {
   const files = Array.isArray(req.body?.files) ? req.body.files : [];
   const results = { saved: 0, linked: 0, unmatched: [], errors: [] };
   for (const f of files) {
@@ -334,7 +336,7 @@ router.post("/photos/bulk", withInstitute(), async (req, res) => {
 });
 
 /** Remove the stored photo of a member. */
-router.delete("/:id/photo", withInstitute(), async (req, res) => {
+router.delete("/:id/photo", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const member = await one("SELECT * FROM members WHERE id = ? AND institute_id = ?", [req.params.id, req.institute.id]);
   if (!member) return res.status(404).json({ error: "Member not found" });
   await deletePhoto(req.institute, member.member_code);
@@ -343,7 +345,7 @@ router.delete("/:id/photo", withInstitute(), async (req, res) => {
 });
 
 /** Store a palm feature template captured by the C++ bridge / enrolment tool. */
-router.post("/:id/palm", withInstitute(), async (req, res) => {
+router.post("/:id/palm", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   const member = await one("SELECT id FROM members WHERE id = ? AND institute_id = ?", [req.params.id, req.institute.id]);
   if (!member) return res.status(404).json({ error: "Member not found" });
   const id = uuid();
@@ -357,7 +359,7 @@ router.post("/:id/palm", withInstitute(), async (req, res) => {
   res.status(201).json({ id });
 });
 
-router.delete("/:id/palm", withInstitute(), async (req, res) => {
+router.delete("/:id/palm", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
   await q("DELETE FROM palm_templates WHERE member_id = ? AND institute_id = ?", [req.params.id, req.institute.id]);
   await logAudit(req, req.institute.id, "member.palm_clear", "palm_templates", req.params.id, null);
   res.json({ ok: true });

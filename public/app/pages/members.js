@@ -52,6 +52,8 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
           <div><label for="f_academic_year_id">Academic year</label><select id="f_academic_year_id" style="width:100%">${options(masters.years)}</select></div>
           <div><label for="f_gender">Gender</label><select id="f_gender" style="width:100%">
             ${["Male", "Female", "Other"].map((g) => `<option>${g}</option>`).join("")}</select></div>
+          <div><label for="f_designation">Designation</label><select id="f_designation" style="width:100%">
+            ${["Student", "Research Scholar", "Faculty", "Staff", "Guest"].map((g) => `<option>${g}</option>`).join("")}</select></div>
           <div><label for="f_status">Status</label><select id="f_status" style="width:100%">
             ${["Active", "Inactive", "Expired", "Blocked"].map((s) => `<option>${s}</option>`).join("")}</select></div>
           <div>
@@ -111,8 +113,9 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
     view.querySelector("#dlgTitle").textContent = member ? "Edit member" : "Add member";
     view.querySelector("#formError").textContent = "";
     for (const [k] of FORM_FIELDS) view.querySelector(`#f_${k}`).value = member?.[k] ?? "";
-    for (const k of ["course_id", "department_id", "academic_year_id", "gender", "status"]) {
-      view.querySelector(`#f_${k}`).value = member?.[k] ?? (k === "gender" ? "Other" : k === "status" ? "Active" : "");
+    for (const k of ["course_id", "department_id", "academic_year_id", "gender", "designation", "status"]) {
+      view.querySelector(`#f_${k}`).value =
+        member?.[k] ?? (k === "gender" ? "Other" : k === "designation" ? "Student" : k === "status" ? "Active" : "");
     }
     view.querySelector("#f_photo").value = "";
     const prev = view.querySelector("#photoPreview");
@@ -141,7 +144,7 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
   view.querySelector("#status").onchange = () => load();
   view.querySelector("#export").onclick = () =>
     downloadCsv("members.csv", rows.map((m) => ({
-      code: m.member_code, name: m.full_name, course: m.course, department: m.department,
+      code: m.member_code, name: m.full_name, course: m.course, department: m.department, designation: m.designation,
       mobile: m.mobile, email: m.email, rfid: m.rfid_uid, valid_from: m.valid_from,
       valid_to: m.valid_to, status: m.status,
     })));
@@ -149,7 +152,7 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
   view.querySelector("#save").onclick = async () => {
     const body = {};
     for (const [k] of FORM_FIELDS) body[k] = view.querySelector(`#f_${k}`).value || null;
-    for (const k of ["course_id", "department_id", "academic_year_id", "gender", "status"]) {
+    for (const k of ["course_id", "department_id", "academic_year_id", "gender", "designation", "status"]) {
       body[k] = view.querySelector(`#f_${k}`).value || null;
     }
     const file = view.querySelector("#f_photo").files[0];

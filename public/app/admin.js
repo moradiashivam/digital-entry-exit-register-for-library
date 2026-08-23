@@ -7,6 +7,7 @@ import { renderSettings } from "/app/pages/settings.js";
 import { renderMasters } from "/app/pages/masters.js";
 import { renderInstitutes } from "/app/pages/institutes.js";
 import { renderAudit } from "/app/pages/audit.js";
+import { renderMasterSetting } from "/app/pages/master-setting.js";
 import { renderOwnerOverview } from "/app/pages/owner-overview.js";
 import { renderOwnerTenants } from "/app/pages/owner-tenants.js";
 import { renderOwnerPlans } from "/app/pages/owner-plans.js";
@@ -15,9 +16,20 @@ import { renderOwnerLeads } from "/app/pages/owner-leads.js";
 import { renderOwnerSettings } from "/app/pages/owner-settings.js";
 import { renderOwnerSite } from "/app/pages/owner-site.js";
 import { renderOwnerDocs, renderAdminDocs } from "/app/pages/docs.js";
-import { mountThemeToggle, initAppearance } from "/app/theme.js";
+import { mountThemeToggle, mountTextSize, initAppearance } from "/app/theme.js";
 
-export const state = { me: null, institutes: [], institute: null };
+export const state = { me: null, institutes: [], institute: null, access: null };
+
+/** True when the signed-in account may use a module in the active university. */
+export const can = (moduleKey) => {
+  const a = state.access;
+  if (!a) return true;
+  return !a.modules || a.modules.includes(moduleKey);
+};
+export const canWrite = () => !state.access?.viewer_only;
+export const canExport = () => state.access?.allow_export !== false;
+export const canBulk = () => state.access?.allow_bulk_upload !== false;
+export const isInstituteAdmin = () => state.access?.admin !== false;
 export const ctx = { api, toast, esc, fmtDate, downloadCsv };
 
 /** University-side pages (never available to the platform owner). */
@@ -26,8 +38,9 @@ const TENANT_PAGES = {
   members: { title: "Members", subtitle: "Students and staff registered for library access", render: renderMembers },
   masters: { title: "Master data", subtitle: "Courses, departments and academic years", render: renderMasters },
   import: { title: "Bulk import", subtitle: "Upload members from an Excel or CSV file", render: renderImport },
-  reports: { title: "Reports", subtitle: "Entry / exit register with filters and export", render: renderReports },
+  reports: { title: "Reports", subtitle: "Visit, student, course, footfall, absentee and location reports with export", render: renderReports },
   audit: { title: "Audit trail", subtitle: "Every administrative action, append-only", render: renderAudit },
+  mastersetting: { title: "Master setting", subtitle: "Sublibraries, sublibrary users, module and kiosk-wise permissions", render: renderMasterSetting },
   settings: { title: "Kiosk settings", subtitle: "Branding and input methods for your kiosk", render: renderSettings },
   docs: { title: "Documentation", subtitle: "Complete guide for university administrators", render: renderAdminDocs },
 };
@@ -44,6 +57,33 @@ const OWNER_PAGES = {
   platform: { title: "System settings", subtitle: "Company, invoicing, email and audit trail", render: renderOwnerSettings },
   docs: { title: "Documentation", subtitle: "Complete guide for the platform owner", render: renderOwnerDocs },
 };
+
+/** Which permission module each university page belongs to. */
+const PAGE_MODULE = {
+  dashboard: "dashboard",
+  members: "members",
+  masters: "master_data",
+  import: "members",
+  reports: "reports",
+  audit: "audit",
+  settings: "kiosks",
+  mastersetting: "master_setting",
+};
+
+/** Hide pages the account is not allowed to open. */
+function visiblePages() {
+  if (state.me?.is_platform_owner) return OWNER_PAGES;
+  const out = {};
+  for (const [key, page] of Object.entries(TENANT_PAGES)) {
+    const mod = PAGE_MODULE[key];
+    if (!mod) { out[key] = page; continue; }
+    if (!can(mod)) continue;
+    if (key === "mastersetting" && !isInstituteAdmin()) continue;
+    if (key === "import" && (!canBulk() || !canWrite())) continue;
+    out[key] = page;
+  }
+  return out;
+}
 
 let PAGES = TENANT_PAGES;
 
@@ -68,11 +108,18 @@ export function navigate(key) {
 
   location.hash = key;
   document.getElementById("pageTitle").textContent = page.title;
-  document.getElementById("pageSubtitle").textContent = page.subtitle;
+  const sub = document.getElementById("pageSubtitle");
+  if (sub) sub.textContent = page.subtitle;
   document.getElementById("pageActions").innerHTML = "";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("active", a.dataset.page === key);
   view.innerHTML = `<p class="muted">Loading…</p>`;
-  Promise.resolve(page.render(view, ctx)).catch((e) => {
+  // Always land at the top of the page so long lists don't keep the old scroll.
+  window.scrollTo(0, 0);
+  document.querySelector(".main")?.scrollTo(0, 0);
+  Promise.resolve(page.render(view, ctx)).then(() => {
+    window.scrollTo({ top: 0, left: 0 });
+    document.querySelector(".main")?.scrollTo({ top: 0, left: 0 });
+  }).catch((e) => {
     view.innerHTML = `<div class="panel"><p style="color:var(--danger)">${esc(e.message)}</p></div>`;
   });
 }
@@ -83,10 +130,17 @@ function buildInstitutePicker() {
     .map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`)
     .join("") || `<option value="">No university yet</option>`;
   if (state.institute) select.value = state.institute.id;
-  select.onchange = () => {
+  select.onchange = async () => {
     setInstitute(select.value);
     state.institute = state.institutes.find((i) => i.id === select.value) ?? null;
-    navigate(location.hash.slice(1) || "dashboard");
+    try {
+      state.access = await api("/api/users/me/access");
+    } catch {
+      state.access = null;
+    }
+    PAGES = visiblePages();
+    buildNav();
+    navigate(location.hash.slice(1) || Object.keys(PAGES)[0] || "dashboard");
   };
 }
 
@@ -118,13 +172,14 @@ async function boot() {
 
   initAppearance();
   mountThemeToggle(document.getElementById("themeToggle"));
+  mountTextSize(document.getElementById("textSize"));
 
   const owner = !!state.me.is_platform_owner;
   PAGES = owner ? OWNER_PAGES : TENANT_PAGES;
-  buildNav();
 
   const picker = document.getElementById("instituteSelect");
   if (owner) {
+    buildNav();
     // The owner never operates inside a university, so no tenant switcher.
     document.querySelector('label[for="instituteSelect"]')?.remove();
     picker.remove();
@@ -133,6 +188,7 @@ async function boot() {
   }
 
   buildInstitutePicker();
+  buildNav();
 
   if (!state.institute) {
     view.innerHTML = `<div class="panel"><h3>No university assigned</h3>
@@ -145,6 +201,15 @@ async function boot() {
       Contact the platform owner to renew.</p></div>`;
     return;
   }
+  // What this account may see and do inside the active university.
+  try {
+    state.access = await api("/api/users/me/access");
+  } catch {
+    state.access = null;
+  }
+  PAGES = visiblePages();
+  buildNav();
+
   // Load the university's local time zone so every date on screen uses it.
   try {
     const ks = await api("/api/settings/kiosk");
@@ -154,7 +219,7 @@ async function boot() {
     /* falls back to the stored/default zone */
   }
 
-  navigate(location.hash.slice(1) || "dashboard");
+  navigate(location.hash.slice(1) || Object.keys(PAGES)[0] || "dashboard");
 }
 
 

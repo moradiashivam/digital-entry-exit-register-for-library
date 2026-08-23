@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin — Library Entry &amp; Exit Register</title>
+  <title>Admin — Library Entry & Exit Register</title>
   <meta name="description" content="Manage universities, members, kiosk branding and entry/exit reports." />
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -11,19 +11,20 @@
   <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
   <div class="shell">
     <aside class="side">
-      <h3 style="margin:0">Entry &amp; Exit Register</h3>
+      <h3 style="margin:0">Entry & Exit Register</h3>
       <p class="muted" id="whoami">Loading…</p>
       <label for="instituteSelect">University</label>
       <select id="instituteSelect" style="width:100%"></select>
       <nav id="nav"></nav>
       <button class="ghost theme-toggle" id="themeToggle"></button>
+
       <button class="ghost" id="signout" style="width:100%;margin-top:1rem">Sign out</button>
     </aside>
     <main class="main">
       <div class="topbar">
-        <div>
+        <div class="topbar-title">
           <h1 id="pageTitle">Dashboard</h1>
-          <p class="muted" id="pageSubtitle"></p>
+          <div id="textSize" class="textsize textsize-inline"></div>
         </div>
         <div id="pageActions" class="row"></div>
       </div>

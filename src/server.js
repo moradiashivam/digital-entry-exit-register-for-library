@@ -13,6 +13,7 @@ import reportRoutes from "./routes/reports.routes.js";
 import settingsRoutes from "./routes/settings.routes.js";
 import publicRoutes from "./routes/public.routes.js";
 import ownerRoutes from "./routes/owner.routes.js";
+import userRoutes from "./routes/users.routes.js";
 import sip2Routes from "./routes/sip2.routes.js";
 import backupRoutes from "./routes/backup.routes.js";
 import { startScheduler } from "./jobs.js";
@@ -42,6 +43,7 @@ app.use("/api/masters", masterRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/owner", ownerRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/sip2", sip2Routes);
 app.use("/api/backup", backupRoutes);
 

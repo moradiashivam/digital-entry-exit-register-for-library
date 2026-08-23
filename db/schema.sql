@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS members (
   department_id CHAR(36) NULL,
   academic_year_id CHAR(36) NULL,
   gender ENUM('Male','Female','Other') NOT NULL DEFAULT 'Other',
+  designation VARCHAR(60) NOT NULL DEFAULT 'Student',
   mobile VARCHAR(10) NULL,
   email VARCHAR(200) NULL,
   photo_url TEXT NULL,
@@ -130,6 +131,7 @@ CREATE TABLE IF NOT EXISTS entry_exit_logs (
   occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_log_time (institute_id, occurred_at),
   KEY idx_log_member (member_id, occurred_at),
+  KEY idx_log_action_time (institute_id, action, occurred_at),
   CONSTRAINT fk_log_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE,
   CONSTRAINT fk_log_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -198,6 +200,23 @@ CREATE TABLE IF NOT EXISTS kiosk_settings (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_kiosk_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Named kiosks / terminals of one university. device_id is what the kiosk sends
+-- with every scan; name is the friendly label shown in reports and on screen.
+CREATE TABLE IF NOT EXISTS kiosk_devices (
+  id CHAR(36) NOT NULL PRIMARY KEY,
+  institute_id CHAR(36) NOT NULL,
+  device_id VARCHAR(80) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  location VARCHAR(120) NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_kiosk_device (institute_id, device_id),
+  CONSTRAINT fk_kioskdev_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 
 CREATE TABLE IF NOT EXISTS library_hours (
   institute_id CHAR(36) NOT NULL,

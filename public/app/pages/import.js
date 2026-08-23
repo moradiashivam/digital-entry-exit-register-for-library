@@ -3,6 +3,7 @@ const CSV_COLUMNS = [
   ["member_code", "required", "Unique code / enrolment number"],
   ["full_name", "required", "Student or staff name"],
   ["gender", "optional", "Male | Female | Other"],
+  ["designation", "optional", "Student | Research Scholar | Faculty | Staff"],
   ["mobile", "optional", "10 digits"],
   ["email", "optional", "name@example.com"],
   ["rfid_uid", "optional", "RFID card UID"],

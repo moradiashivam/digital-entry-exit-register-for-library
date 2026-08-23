@@ -18,7 +18,9 @@ const TOGGLES = [
   ["allow_barcode", "Allow camera barcode scan"],
   ["show_photo", "Show student photo"],
   ["show_clock", "Show clock"],
+  ["multi_kiosk_transfer", "Automatic transfer between kiosks (a visit opened at one kiosk closes there and re-opens here)"],
 ];
+
 
 export async function renderSettings(view, { api, esc, toast }) {
   const s = await api("/api/settings/kiosk");
@@ -71,11 +73,25 @@ export async function renderSettings(view, { api, esc, toast }) {
         </div>
 
         <div class="panel">
+          <h3>Kiosks / terminals</h3>
+          <p class="muted">Create one entry for every kiosk computer (main gate, reading hall, second floor…),
+            rename them any time, and open each kiosk with its own link. The kiosk name is stored with every
+            scan so location-wise reports stay readable.</p>
+          <div id="kiosksBox" class="muted">Loading…</div>
+          <div class="row" style="margin-top:.8rem;align-items:center;flex-wrap:wrap">
+            <input id="newKioskName" placeholder="New kiosk name, e.g. Reading hall" />
+            <input id="newKioskLoc" placeholder="Location (optional)" />
+            <button id="addKiosk">Add kiosk</button>
+          </div>
+        </div>
+
+        <div class="panel">
           <h3>Library working hours</h3>
           <p class="muted">Set opening and closing time for each day. Anyone still marked inside is
             automatically exited at that day's closing time.</p>
           <div id="hoursBox" class="muted">Loading…</div>
         </div>
+
 
         <div class="panel">
           <h3>Staff with access</h3>
@@ -235,7 +251,80 @@ export async function renderSettings(view, { api, esc, toast }) {
 
 
 
+  // ---------- Kiosks / terminals ----------
+  const kiosksBox = view.querySelector("#kiosksBox");
+  const kioskLink = (deviceId) => `/kiosk/${slug}?device=${encodeURIComponent(deviceId)}`;
+
+  const paintKiosks = (list) => {
+    kiosksBox.classList.remove("muted");
+    kiosksBox.innerHTML = list.length
+      ? `<table><thead><tr><th>Name</th><th>Location</th><th>Kiosk link</th><th>Active</th><th></th></tr></thead>
+        <tbody>${list.map((k) => `<tr data-id="${esc(k.id)}">
+          <td><input class="k-name" value="${esc(k.name)}" /></td>
+          <td><input class="k-loc" value="${esc(k.location ?? "")}" placeholder="e.g. Main gate" /></td>
+          <td><a href="${esc(kioskLink(k.device_id))}" target="_blank">${esc(kioskLink(k.device_id))}</a></td>
+          <td style="text-align:center"><input type="checkbox" class="k-active" ${k.is_active ? "checked" : ""} /></td>
+          <td class="row" style="gap:.35rem">
+            <button class="k-save">Save</button>
+            <button class="ghost k-del">Delete</button>
+          </td></tr>`).join("")}</tbody></table>`
+      : `<p class="muted">No kiosk added yet.</p>`;
+
+    for (const tr of kiosksBox.querySelectorAll("tbody tr")) {
+      const id = tr.dataset.id;
+      tr.querySelector(".k-save").onclick = async () => {
+        try {
+          await api(`/api/settings/kiosks/${id}`, {
+            method: "PATCH",
+            body: {
+              name: tr.querySelector(".k-name").value,
+              location: tr.querySelector(".k-loc").value,
+              is_active: tr.querySelector(".k-active").checked,
+            },
+          });
+          toast("Kiosk saved");
+          loadKiosks();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+      tr.querySelector(".k-del").onclick = async () => {
+        if (!confirm("Remove this kiosk? Past scans keep their records.")) return;
+        try {
+          await api(`/api/settings/kiosks/${id}`, { method: "DELETE" });
+          toast("Kiosk removed");
+          loadKiosks();
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+    }
+  };
+
+  const loadKiosks = () => api("/api/settings/kiosks").then(paintKiosks).catch(() => {
+    kiosksBox.textContent = "Could not load kiosks.";
+  });
+  loadKiosks();
+
+  view.querySelector("#addKiosk").onclick = async () => {
+    const name = view.querySelector("#newKioskName").value.trim();
+    if (!name) return toast("Give the kiosk a name first", true);
+    try {
+      await api("/api/settings/kiosks", {
+        method: "POST",
+        body: { name, location: view.querySelector("#newKioskLoc").value },
+      });
+      view.querySelector("#newKioskName").value = "";
+      view.querySelector("#newKioskLoc").value = "";
+      toast("Kiosk added");
+      loadKiosks();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+
   // ---------- Library working hours ----------
+
   const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const hoursBox = view.querySelector("#hoursBox");
   const paintHours = (days) => {

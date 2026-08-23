@@ -72,32 +72,37 @@ export async function ensureSchemaExtras() {
   const { fileURLToPath } = await import("node:url");
   const dir = path.dirname(fileURLToPath(import.meta.url));
 
-  // Platform (owner) tables.
-  const sql = await readFile(path.join(dir, "..", "db", "platform.sql"), "utf8");
-  for (const stmt of sql.split(/;\s*\n/)) {
-    // Drop comment lines so a leading comment block never hides the statement.
-    const s = stmt
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("--"))
-      .join("\n")
-      .trim();
-    if (s) await pool.query(s);
+  // Platform (owner) tables + Master Setting (sublibrary access) tables.
+  for (const file of ["platform.sql", "access.sql"]) {
+    const sql = await readFile(path.join(dir, "..", "db", file), "utf8");
+    for (const stmt of sql.split(/;\s*\n/)) {
+      // Drop comment lines so a leading comment block never hides the statement.
+      const s = stmt
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("--"))
+        .join("\n")
+        .trim();
+      if (s) await pool.query(s);
+    }
   }
 
 
   const extras = [
     ["kiosk_settings", "theme", "ENUM('dark','light') NOT NULL DEFAULT 'light'"],
     ["kiosk_settings", "custom_css", "TEXT NULL"],
+    ["kiosk_settings", "multi_kiosk_transfer", "TINYINT(1) NOT NULL DEFAULT 1"],
     ["institutes", "code", "VARCHAR(40) NULL"],
     ["institutes", "plan_id", "CHAR(36) NULL"],
     ["institutes", "status", "ENUM('Active','Suspended','Deactivated') NOT NULL DEFAULT 'Active'"],
     ["institutes", "auto_renew", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["institutes", "lead_id", "CHAR(36) NULL"],
     ["members", "import_batch_id", "CHAR(36) NULL"],
+    ["kiosk_devices", "sublibrary_id", "CHAR(36) NULL"],
     ["bulk_import_logs", "duplicate_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "updated_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "skipped_count", "INT NOT NULL DEFAULT 0"],
   ];
+
   for (const [table, column, ddl] of extras) {
     const found = await one(
       `SELECT 1 AS ok FROM information_schema.columns
@@ -106,6 +111,21 @@ export async function ensureSchemaExtras() {
     );
     if (!found) await pool.query(`ALTER TABLE \`${table}\` ADD COLUMN \`${column}\` ${ddl}`);
   }
+
+  // Master Setting adds sublibrary roles to the existing role list.
+  const roleCol = await one(
+    `SELECT COLUMN_TYPE AS t FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'user_roles' AND column_name = 'role'`,
+  );
+  if (roleCol && !String(roleCol.t).includes("sublibrary_admin")) {
+    await pool.query(
+      `ALTER TABLE user_roles MODIFY COLUMN role
+       ENUM('super_admin','librarian','report_viewer','sublibrary_admin','operator','viewer')
+       NOT NULL DEFAULT 'operator'`,
+    );
+  }
+
+
 
   // One-time: flip existing kiosks to the new light default (only rows still on dark).
   const needFlip = await one(`SELECT 1 AS ok FROM kiosk_settings WHERE theme = 'dark' LIMIT 1`);

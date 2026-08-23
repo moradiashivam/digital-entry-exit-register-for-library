@@ -57,6 +57,26 @@ const run = async () => {
     console.log("✔ kiosk_settings.allow_barcode added");
   }
 
+  // Designation (Student / Research Scholar / Faculty ...) — added in a later version.
+  const [dsCol] = await conn.query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = 'members' AND column_name = 'designation'",
+    [dbName],
+  );
+  if (!dsCol.length) {
+    await conn.query("ALTER TABLE members ADD COLUMN designation VARCHAR(60) NOT NULL DEFAULT 'Student' AFTER gender");
+    console.log("\u2714 members.designation added");
+  }
+
+  // Index that keeps the report aggregates fast as the log table grows.
+  const [logIdx] = await conn.query(
+    "SELECT 1 FROM information_schema.statistics WHERE table_schema = ? AND table_name = 'entry_exit_logs' AND index_name = 'idx_log_action_time'",
+    [dbName],
+  );
+  if (!logIdx.length) {
+    await conn.query("ALTER TABLE entry_exit_logs ADD KEY idx_log_action_time (institute_id, action, occurred_at)");
+    console.log("\u2714 entry_exit_logs report index added");
+  }
+
   const email = (process.env.OWNER_EMAIL || "owner@example.com").toLowerCase();
   const password = process.env.OWNER_PASSWORD || "ChangeThisOwnerPassword1!";
   const [rows] = await conn.query("SELECT id FROM users WHERE email = ?", [email]);

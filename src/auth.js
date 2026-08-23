@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { q, one, uuid } from "./db.js";
+import { loadAccess, accessFor, WRITE_ROLES } from "./access.js";
+
 
 const SECRET = process.env.JWT_SECRET || "dev-only-secret-change-me";
 const HOURS = Number(process.env.JWT_HOURS || 12);
@@ -32,6 +34,7 @@ export async function loadUser(req, _res, next) {
       "SELECT institute_id, role FROM user_roles WHERE user_id = ?",
       [user.id],
     );
+    user.access = await loadAccess(user.id);
     req.user = user;
   } catch {
     /* invalid or expired token — treated as signed out */
@@ -64,11 +67,17 @@ export function rolesFor(user, instituteId) {
  * apply only to platform tables — universities, plans, payments, leads, settings.
  * These checks therefore never grant access just because someone is the owner.
  */
-export const isStaff = (user, instituteId) =>
-  rolesFor(user, instituteId).some((r) => r === "super_admin" || r === "librarian");
+export const isStaff = (user, instituteId) => {
+  if (!rolesFor(user, instituteId).some((r) => WRITE_ROLES.includes(r))) return false;
+  return !accessFor(user, instituteId).viewer_only;
+};
 
-export const canViewReports = (user, instituteId) =>
-  isStaff(user, instituteId) || rolesFor(user, instituteId).includes("report_viewer");
+/** Anyone attached to the university may read reports (module rules apply after). */
+export const canViewReports = (user, instituteId) => rolesFor(user, instituteId).length > 0;
+
+/** University administrator of this institute. */
+export const isInstituteAdmin = (user, instituteId) =>
+  rolesFor(user, instituteId).includes("super_admin");
 
 export const isMember = (user, instituteId) => rolesFor(user, instituteId).length > 0;
 
@@ -85,6 +94,7 @@ export function withInstitute(check = isStaff) {
     if (!inst) return res.status(404).json({ error: "University not found" });
     if (!check(req.user, inst.id)) return res.status(403).json({ error: "Not allowed for this university" });
     req.institute = inst;
+    req.access = accessFor(req.user, inst.id);
     next();
   };
 }

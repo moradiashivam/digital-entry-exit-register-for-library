@@ -1,7 +1,14 @@
 import { esc } from "/app/api.js";
 
 const slug = location.pathname.split("/").filter(Boolean)[1] || "";
-const deviceId = localStorage.getItem("ler_device") || "kiosk-1";
+// ?device=main-gate pins this screen to a named kiosk and remembers it on this computer.
+const askedDevice = new URLSearchParams(location.search).get("device");
+if (askedDevice) localStorage.setItem(`ler_device_${slug}`, askedDevice);
+let deviceId = askedDevice
+  || localStorage.getItem(`ler_device_${slug}`)
+  || localStorage.getItem("ler_device")
+  || "kiosk-1";
+
 const el = (id) => document.getElementById(id);
 
 let settings = {};
@@ -138,7 +145,10 @@ async function startCamera() {
 }
 
 async function boot() {
-  const res = await fetch(`/api/public/kiosk/${encodeURIComponent(slug)}`, { cache: "no-store" });
+  const res = await fetch(
+    `/api/public/kiosk/${encodeURIComponent(slug)}?device=${encodeURIComponent(deviceId)}`,
+    { cache: "no-store" },
+  );
   if (!res.ok) {
     document.body.innerHTML = `<main class="kiosk"><section class="panel kiosk-card">
       <h1>Kiosk not configured</h1><p class="muted">No university uses the link “${esc(slug)}”.</p></section></main>`;
@@ -146,10 +156,22 @@ async function boot() {
   }
   const data = await res.json();
   settings = data.settings || {};
+  if (data.device?.device_id) {
+    deviceId = data.device.device_id;
+    localStorage.setItem(`ler_device_${slug}`, deviceId);
+  }
   document.body.classList.toggle("light", settings.theme === "light");
   applyCustomCss(settings.custom_css);
   el("institution").textContent = settings.institution_name || data.institute.name;
   el("title").textContent = settings.kiosk_title || "Library Entry Kiosk";
+  const nameEl = el("kioskName");
+  if (nameEl) {
+    const label = data.device
+      ? [data.device.name, data.device.location].filter(Boolean).join(" · ")
+      : "";
+    nameEl.textContent = label;
+    nameEl.hidden = !label;
+  }
   el("welcome").textContent = settings.welcome_message || "";
   el("footer").textContent = settings.footer_note || "";
   if (settings.logo_url) {
@@ -157,6 +179,7 @@ async function boot() {
     el("logo").hidden = false;
   }
   if (settings.show_clock === 0) el("clock").hidden = true; else startClock();
+
   if (!data.subscription_active) {
     const suspended = data.kiosk_disabled_reason === "suspended";
     el("result").innerHTML = `<div class="result bad"><h2>Kiosk disabled</h2>

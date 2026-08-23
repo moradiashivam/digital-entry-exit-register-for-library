@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { q, uuid } from "../db.js";
 import { requireAuth, withInstitute, isMember, logAudit } from "../auth.js";
+import { requireModule, requireWrite } from "../access.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -8,7 +9,7 @@ router.use(requireAuth);
 const TABLES = { courses: "courses", departments: "departments", years: "academic_years" };
 
 /** Courses, departments and academic years for the active university. */
-router.get("/", withInstitute(isMember), async (req, res) => {
+router.get("/", withInstitute(isMember), requireModule("master_data"), async (req, res) => {
   const [courses, departments, years] = await Promise.all([
     q("SELECT id, name FROM courses WHERE institute_id = ? ORDER BY name", [req.institute.id]),
     q("SELECT id, name FROM departments WHERE institute_id = ? ORDER BY name", [req.institute.id]),
@@ -17,7 +18,7 @@ router.get("/", withInstitute(isMember), async (req, res) => {
   res.json({ courses, departments, years });
 });
 
-router.post("/:kind", withInstitute(), async (req, res) => {
+router.post("/:kind", withInstitute(), requireModule("master_data"), requireWrite, async (req, res) => {
   const table = TABLES[req.params.kind];
   if (!table) return res.status(404).json({ error: "Unknown list" });
   const name = String(req.body?.name || "").trim();
@@ -33,7 +34,7 @@ router.post("/:kind", withInstitute(), async (req, res) => {
   res.status(201).json({ id, name });
 });
 
-router.delete("/:kind/:id", withInstitute(), async (req, res) => {
+router.delete("/:kind/:id", withInstitute(), requireModule("master_data"), requireWrite, async (req, res) => {
   const table = TABLES[req.params.kind];
   if (!table) return res.status(404).json({ error: "Unknown list" });
   await q(`DELETE FROM ${table} WHERE id = ? AND institute_id = ?`, [req.params.id, req.institute.id]);
