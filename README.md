@@ -109,6 +109,9 @@ zip from the [Releases page](https://github.com/moradiashivam/digital-entry-exit
 - Returns member identity, action (Entry/Exit) and photo URL
 
 ---
+🔄 Workflow
+<p align="center"> <img src="Photos/flowchart.png" alt="Application workflow" width="700"/> </p>
+
 
 ## 📸 Screenshots
 
