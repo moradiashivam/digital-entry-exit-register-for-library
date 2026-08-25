@@ -62,7 +62,19 @@ export async function renderImport(view, { api, esc, toast }) {
         <button class="ghost" id="template">Download template</button>
         <button id="upload" disabled>Import rows</button>
       </div>
+      <div id="progressWrap" style="display:none;margin-top:1rem">
+        <div class="row" style="justify-content:space-between;align-items:baseline">
+          <strong id="progressLabel">Importing…</strong>
+          <span class="muted" id="progressCount">0 / 0 rows</span>
+        </div>
+        <div style="margin-top:.4rem;height:14px;border-radius:999px;background:var(--border,#e5e7eb);overflow:hidden">
+          <div id="progressBar" style="height:100%;width:0%;border-radius:999px;
+            background:linear-gradient(90deg,#1d4ed8,#3b82f6);transition:width .2s ease"></div>
+        </div>
+        <p class="muted" id="progressStats" style="margin-top:.4rem"></p>
+      </div>
       <div id="preview" style="margin-top:1rem"></div>
+
     </div>
 
     <div class="panel" style="margin-top:1rem">
@@ -174,46 +186,99 @@ export async function renderImport(view, { api, esc, toast }) {
       <tbody>${parsed.slice(0, 5).map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   };
 
+  /** RFC-4122-ish id so every chunk of one file lands in the same import batch. */
+  const newBatchId = () =>
+    (crypto.randomUUID ? crypto.randomUUID()
+      : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+        }));
+
   view.querySelector("#upload").onclick = async () => {
     const btn = view.querySelector("#upload");
     btn.disabled = true;
-    try {
-      const out = await api("/api/members/bulk", {
-        method: "POST",
-        body: {
-          file_name: view.querySelector("#file").files[0]?.name || "import.csv",
-          rows: parsed,
-          duplicate_mode: view.querySelector("#dupMode").value,
-          defaults: defaults(),
-        },
-      });
 
-      toast(`${out.imported} new, ${out.updated} updated, ${out.failed} failed`, out.failed > 0);
-      const stat = (label, value) =>
-        `<div class="panel" style="padding:.6rem .8rem"><div class="muted">${label}</div>
+    const wrap = view.querySelector("#progressWrap");
+    const bar = view.querySelector("#progressBar");
+    const count = view.querySelector("#progressCount");
+    const stats = view.querySelector("#progressStats");
+    const label = view.querySelector("#progressLabel");
+    const totals = { total: 0, imported: 0, updated: 0, skipped: 0, duplicates: 0, failed: 0, errors: [] };
+    const CHUNK = 1000;
+    const fileName = view.querySelector("#file").files[0]?.name || "import.csv";
+    const duplicateMode = view.querySelector("#dupMode").value;
+    const batchId = newBatchId();
+    const fixed = defaults();
+
+    wrap.style.display = "";
+    label.textContent = "Importing…";
+    bar.style.width = "0%";
+    count.textContent = `0 / ${parsed.length} rows`;
+    stats.textContent = "";
+    view.querySelector("#preview").innerHTML = "";
+
+    try {
+      for (let i = 0; i < parsed.length; i += CHUNK) {
+        const chunk = parsed.slice(i, i + CHUNK);
+        const out = await api("/api/members/bulk", {
+          method: "POST",
+          body: {
+            file_name: fileName,
+            rows: chunk,
+            duplicate_mode: duplicateMode,
+            defaults: fixed,
+            batch_id: batchId,
+            row_offset: i,
+            is_last: i + CHUNK >= parsed.length,
+          },
+        });
+        totals.total += out.total;
+        totals.imported += out.imported;
+        totals.updated += out.updated;
+        totals.skipped += out.skipped;
+        totals.duplicates += out.duplicates;
+        totals.failed += out.failed;
+        totals.errors.push(...out.errors);
+
+        const done = Math.min(i + CHUNK, parsed.length);
+        bar.style.width = `${Math.round((done / parsed.length) * 100)}%`;
+        count.textContent = `${done} / ${parsed.length} rows`;
+        stats.textContent =
+          `${totals.imported} added · ${totals.updated} updated · ${totals.skipped} skipped · ${totals.failed} failed`;
+        // Let the browser paint the bar before the next chunk goes out.
+        await new Promise((r) => requestAnimationFrame(() => r()));
+      }
+
+      label.textContent = "Import finished";
+      bar.style.width = "100%";
+      toast(`${totals.imported} new, ${totals.updated} updated, ${totals.failed} failed`, totals.failed > 0);
+      const stat = (l, value) =>
+        `<div class="panel" style="padding:.6rem .8rem"><div class="muted">${l}</div>
          <div style="font-size:1.3rem;font-weight:700">${value}</div></div>`;
       view.querySelector("#preview").innerHTML = `
         <h4>Import summary</h4>
         <div class="grid cols-3" style="margin-top:.5rem">
-          ${stat("Total records", out.total)}
-          ${stat("Successfully imported", out.imported)}
-          ${stat("Duplicates detected", out.duplicates)}
-          ${stat("Skipped", out.skipped)}
-          ${stat("Overwritten / updated", out.updated)}
-          ${stat("Failed", out.failed)}
+          ${stat("Total records", totals.total)}
+          ${stat("Successfully imported", totals.imported)}
+          ${stat("Duplicates detected", totals.duplicates)}
+          ${stat("Skipped", totals.skipped)}
+          ${stat("Overwritten / updated", totals.updated)}
+          ${stat("Failed", totals.failed)}
         </div>
-        ${out.errors.length
+        ${totals.errors.length
           ? `<h4 style="margin-top:1rem">Rows that failed</h4>
              <table><thead><tr><th>Row</th><th>Member code</th><th>Reason</th></tr></thead><tbody>
-             ${out.errors.map((e) => `<tr><td>${e.row}</td><td>${esc(e.member_code || "—")}</td>
+             ${totals.errors.map((e) => `<tr><td>${e.row}</td><td>${esc(e.member_code || "—")}</td>
                <td>${esc(e.error)}</td></tr>`).join("")}</tbody></table>`
           : `<p class="muted" style="margin-top:.6rem">No failed rows.</p>`}`;
       await loadHistory();
     } catch (e) {
+      label.textContent = "Import stopped";
       toast(e.message, true);
     } finally {
       btn.disabled = false;
     }
+
   };
 
   const readFile = (file) => new Promise((resolve, reject) => {

@@ -11,20 +11,29 @@ router.get("/kiosk/:slug", async (req, res) => {
   const inst = await one("SELECT id, name, slug, status, subscription_start, subscription_end FROM institutes WHERE slug = ?", [req.params.slug]);
   if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
   const settings = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [inst.id]);
-  const devices = await q(
-    "SELECT device_id, name, location FROM kiosk_devices WHERE institute_id = ? AND is_active = 1 ORDER BY name",
+  const all = await q(
+    "SELECT device_id, name, location, is_active FROM kiosk_devices WHERE institute_id = ? ORDER BY name",
     [inst.id],
   );
   const wanted = String(req.query.device || "").trim();
-  const device = devices.find((d) => d.device_id === wanted) || devices[0] || null;
+  // Always resolve the terminal that was actually asked for, even when it is
+  // switched off — otherwise the link silently logs scans as another kiosk.
+  const device = all.find((d) => d.device_id === wanted)
+    || all.find((d) => Number(d.is_active) === 1)
+    || all[0]
+    || null;
+  const deviceOff = !!device && Number(device.is_active) !== 1;
+  const enabled = kioskEnabled(inst) && !deviceOff;
   res.json({
     institute: { id: inst.id, name: inst.name, slug: inst.slug },
-    subscription_active: kioskEnabled(inst),
-    kiosk_disabled_reason: kioskEnabled(inst)
+    subscription_active: enabled,
+    kiosk_disabled_reason: enabled
       ? null
-      : (inst.status && inst.status !== "Active" ? "suspended" : "expired"),
+      : (!kioskEnabled(inst)
+        ? (inst.status && inst.status !== "Active" ? "suspended" : "expired")
+        : "inactive"),
     settings: settings ?? { institution_name: inst.name },
-    devices,
+    devices: all.filter((d) => Number(d.is_active) === 1),
     device,
   });
 });
@@ -72,6 +81,20 @@ router.post("/scan-event", async (req, res) => {
       message: suspended
         ? "Kiosk disabled — this university's account is suspended. Contact the administrator."
         : "Subscription expired — contact the administrator",
+    });
+  }
+
+  // A terminal that has been un-ticked in Master Setting must not record scans.
+  const terminal = await one(
+    "SELECT name, is_active FROM kiosk_devices WHERE institute_id = ? AND device_id = ?",
+    [inst.id, deviceId],
+  );
+  if (terminal && Number(terminal.is_active) !== 1) {
+    await recordFailure(inst.id, deviceId, slug, "Kiosk terminal inactive", method);
+    return res.status(403).json({
+      status: "rejected",
+      reason: "kiosk_inactive",
+      message: "This kiosk terminal is switched off. Tick “Active” for it in Master Setting.",
     });
   }
 

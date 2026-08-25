@@ -53,3 +53,17 @@ CREATE TABLE IF NOT EXISTS user_kiosks (
   CONSTRAINT fk_ukiosk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_ukiosk_dev FOREIGN KEY (kiosk_id) REFERENCES kiosk_devices(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Calendar overrides: holidays, closed days or custom timings for one date.
+CREATE TABLE IF NOT EXISTS library_special_days (
+  institute_id CHAR(36) NOT NULL,
+  day DATE NOT NULL,
+  is_closed TINYINT(1) NOT NULL DEFAULT 1,
+  open_time TIME NOT NULL DEFAULT '09:00:00',
+  close_time TIME NOT NULL DEFAULT '18:00:00',
+  auto_exit TINYINT(1) NOT NULL DEFAULT 1,
+  reason VARCHAR(160) NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (institute_id, day),
+  CONSTRAINT fk_specialday_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

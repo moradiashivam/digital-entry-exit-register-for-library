@@ -107,11 +107,63 @@ router.put("/hours", withInstitute(), requireModule("kiosks"), requireWrite, asy
   res.json({ ok: true });
 });
 
+/* ---------------- Special days (holiday / custom timing calendar) ---------------- */
+
+const ymd = (v) => {
+  const m = String(v ?? "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[0] : null;
+};
+
+/** All calendar overrides, newest first (optionally filtered to one month). */
+router.get("/special-days", withInstitute(isMember), async (req, res) => {
+  const rows = await q(
+    "SELECT * FROM library_special_days WHERE institute_id = ? ORDER BY day",
+    [req.institute.id],
+  );
+  res.json(rows.map((r) => ({
+    day: String(r.day).slice(0, 10),
+    is_closed: Number(r.is_closed) ? 1 : 0,
+    open_time: String(r.open_time).slice(0, 5),
+    close_time: String(r.close_time).slice(0, 5),
+    auto_exit: Number(r.auto_exit) ? 1 : 0,
+    reason: r.reason || "",
+  })));
+});
+
+/** Add or update one calendar day. */
+router.put("/special-days", withInstitute(), requireModule("kiosks"), requireWrite, async (req, res) => {
+  const day = ymd(req.body?.day);
+  if (!day) return res.status(400).json({ error: "Pick a valid date" });
+  const isClosed = req.body?.is_closed ? 1 : 0;
+  const open = hhmm(req.body?.open_time) || "09:00";
+  const close = hhmm(req.body?.close_time) || "18:00";
+  const reason = String(req.body?.reason ?? "").trim().slice(0, 160) || null;
+  await q(
+    `INSERT INTO library_special_days (institute_id, day, is_closed, open_time, close_time, auto_exit, reason)
+     VALUES (?,?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE is_closed = VALUES(is_closed), open_time = VALUES(open_time),
+       close_time = VALUES(close_time), auto_exit = VALUES(auto_exit), reason = VALUES(reason)`,
+    [req.institute.id, day, isClosed, `${open}:00`, `${close}:00`, req.body?.auto_exit ? 1 : 0, reason],
+  );
+  await logAudit(req, req.institute.id, "settings.special_day_save", "library_special_days", day, { day, isClosed, reason });
+  res.json({ day, is_closed: isClosed, open_time: open, close_time: close, auto_exit: req.body?.auto_exit ? 1 : 0, reason: reason || "" });
+});
+
+/** Remove one calendar override (day falls back to the weekly hours). */
+router.delete("/special-days/:day", withInstitute(), requireModule("kiosks"), requireWrite, async (req, res) => {
+  const day = ymd(req.params.day);
+  if (!day) return res.status(400).json({ error: "Invalid date" });
+  await q("DELETE FROM library_special_days WHERE institute_id = ? AND day = ?", [req.institute.id, day]);
+  await logAudit(req, req.institute.id, "settings.special_day_delete", "library_special_days", day, { day });
+  res.json({ ok: true });
+});
+
 /** Close open visits now, using each weekday's closing time. */
 router.post("/hours/auto-exit", withInstitute(), requireModule("kiosks"), requireWrite, async (req, res) => {
   const closed = await autoExitInstitute(req.institute.id);
   res.json({ closed });
 });
+
 
 /* ---------------- Kiosks / terminals ---------------- */
 

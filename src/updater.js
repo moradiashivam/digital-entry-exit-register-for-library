@@ -102,7 +102,21 @@ function normalise(entries) {
  * A valid package looks like the application: it has package.json and src/server.js.
  */
 export function inspectPackage(buffer) {
-  const entries = normalise(readZip(buffer));
+  let entries = normalise(readZip(buffer));
+  const hasAppRoot = (items) =>
+    items.some((e) => e.path === "package.json" && !e.dir) &&
+    items.some((e) => e.path === "src/server.js" && !e.dir);
+
+  // GitHub source archives contain the complete repository, while this
+  // self-hosted application lives in its mysql-app subfolder.
+  if (!hasAppRoot(entries)) {
+    const prefix = "mysql-app/";
+    const nested = entries
+      .filter((e) => e.path.startsWith(prefix))
+      .map((e) => ({ ...e, path: e.path.slice(prefix.length) }))
+      .filter((e) => e.path);
+    if (hasAppRoot(nested)) entries = nested;
+  }
   const files = entries.filter((e) => !e.dir);
   const byPath = new Map(files.map((f) => [f.path, f]));
 

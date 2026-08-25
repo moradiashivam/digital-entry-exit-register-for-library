@@ -17,6 +17,12 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
     const s = (await api("/api/update/status")) || {};
     const history = arr(await api("/api/update/history"));
     const last = s.last_update;
+    let gh = null;
+    try {
+      gh = await api("/api/update/github");
+    } catch {
+      /* offline or GitHub unreachable — the panel shows the error */
+    }
 
     const badge = (status) => {
       const tone = status === "Success" ? "var(--ok, #1a7f37)" : status === "Running" ? "var(--muted)" : "var(--danger)";
@@ -36,6 +42,35 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
         </div>
         <p class="muted">Application folder: <code>${esc(s.app_root)}</code></p>
       </div>
+
+      <div class="panel" style="margin-top:1rem">
+        <h3 style="margin-top:0">Automatic update from GitHub</h3>
+        <p class="muted">The application checks the official release page once a day. Repository:
+          <code>${esc(gh?.repo || "—")}</code></p>
+        <div class="row">
+          <div><label>Current version</label><div style="font-size:1.2rem;font-weight:700">v${esc((gh?.installed_version) || s.version)}</div></div>
+          <div><label>Latest version</label><div style="font-size:1.2rem;font-weight:700">${esc(gh?.latest_version || "—")}</div></div>
+          <div><label>Status</label><div id="ghStatus" style="font-weight:700;color:${
+            gh?.update_available ? "var(--danger)" : "var(--ok, #1a7f37)"
+          }">${esc(gh?.status || "Unknown")}</div></div>
+          <div><label>Last checked</label><div class="muted">${esc(fmtDate(gh?.last_checked) || "never")}</div></div>
+        </div>
+        ${gh?.error ? `<p style="color:var(--danger)">Last check failed: ${esc(gh.error)}</p>` : ""}
+        ${
+          gh?.update_available
+            ? `<p style="font-weight:600">Update Available — Version ${esc(gh.latest_version)}${
+                gh.release?.html_url ? ` · <a href="${esc(gh.release.html_url)}" target="_blank" rel="noopener">release notes</a>` : ""
+              }</p>`
+            : ""
+        }
+        <div class="row" style="align-items:center">
+          <button class="ghost" id="ghCheck">Check for updates</button>
+          <button id="ghInstall" ${gh?.update_available ? "" : "disabled"}>Update now</button>
+        </div>
+        <p class="muted" id="ghInfo"></p>
+        <div id="ghLog" class="muted" style="margin-top:.6rem"></div>
+      </div>
+
 
       <div class="panel" style="margin-top:1rem">
         <h3 style="margin-top:0">Update application</h3>
@@ -123,6 +158,63 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
           return `<div style="color:${colour}">${esc(fmtDate(st.at))} — ${esc(st.message)}</div>`;
         })
         .join("");
+    };
+
+    /* ---- GitHub automatic update ---- */
+    const ghInfo = view.querySelector("#ghInfo");
+    const ghLog = view.querySelector("#ghLog");
+    const ghLine = (message, level = "info") => {
+      const colour = level === "error" ? "var(--danger)" : level === "success" ? "var(--ok, #1a7f37)" : "inherit";
+      ghLog.insertAdjacentHTML("beforeend", `<div style="color:${colour}">${esc(message)}</div>`);
+    };
+
+    view.querySelector("#ghCheck").onclick = async (ev) => {
+      ev.target.disabled = true;
+      ghInfo.textContent = "Checking the latest release on GitHub…";
+      try {
+        const r = await api("/api/update/github/check", { method: "POST" });
+        ghInfo.textContent = r.update_available
+          ? `Update Available — Version ${r.latest_version}`
+          : r.error
+            ? `Check failed: ${r.error}`
+            : "Application is up to date.";
+        toast(ghInfo.textContent);
+        await draw();
+      } catch (e) {
+        ghInfo.textContent = `Check failed: ${e.message}`;
+        toast(e.message, true);
+        ev.target.disabled = false;
+      }
+    };
+
+    view.querySelector("#ghInstall").onclick = async (ev) => {
+      if (!confirm(`Download and install ${gh?.latest_version} from GitHub? A backup of the files and database is taken first.`)) return;
+      ev.target.disabled = true;
+      ghLog.innerHTML = "";
+      view.querySelector("#ghStatus").textContent = "Updating";
+      ghInfo.textContent = "Updating — do not close this window…";
+      ["Checking latest release…", "Downloading update…", "Creating backup…", "Extracting files…", "Updating database…"].forEach((m) =>
+        ghLine(m),
+      );
+      try {
+        const r = await api("/api/update/github/install", { method: "POST" });
+        ghLog.innerHTML = "";
+        arr(r.steps).forEach((st) => ghLine(`${fmtDate(st.at)} — ${st.message}`, st.level));
+        if (r.upToDate) {
+          ghInfo.textContent = "Application is already up to date.";
+        } else {
+          ghLine("Update completed successfully. Restart the application to run the new version.", "success");
+          ghInfo.textContent = `Updated to ${r.tag || `v${r.version}`}. Restart the application below.`;
+        }
+        view.querySelector("#ghStatus").textContent = "Update Completed";
+        toast("Update completed");
+      } catch (e) {
+        ghLine(`Update failed: ${e.message}`, "error");
+        view.querySelector("#ghStatus").textContent = "Update Failed";
+        ghInfo.textContent = `Update failed: ${e.message}`;
+        toast(e.message, true);
+        ev.target.disabled = false;
+      }
     };
 
     const pick = async () => {

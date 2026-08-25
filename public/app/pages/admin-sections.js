@@ -106,9 +106,17 @@ export function hoursPanel(box, { api, esc, toast }) {
       <p class="muted">Set opening and closing time for each day. Anyone still marked inside is
         automatically exited at that day's closing time.</p>
       <div id="hoursBox" class="muted">Loading…</div>
+    </div>
+    <div class="panel" style="margin-top:1rem">
+      <h3>Holiday &amp; special-day calendar</h3>
+      <p class="muted">Pick any date to mark it a holiday / closed day, or to give it custom opening
+        and closing times. A calendar day always overrides the weekly hours above.</p>
+      <div id="specialBox" class="muted">Loading…</div>
     </div>`;
 
   const hoursBox = box.querySelector("#hoursBox");
+  specialDaysPanel(box.querySelector("#specialBox"), { api, esc, toast });
+
   const paintHours = (days) => {
     hoursBox.classList.remove("muted");
     hoursBox.innerHTML = `
@@ -170,6 +178,137 @@ export function hoursPanel(box, { api, esc, toast }) {
     hoursBox.textContent = "Could not load working hours.";
   });
 }
+
+/* ---------------- Holiday / special-day calendar ---------------- */
+
+const ymdOf = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export function specialDaysPanel(box, { api, esc, toast }) {
+  let cursor = new Date();
+  cursor.setDate(1);
+  let days = new Map(); // "YYYY-MM-DD" -> override row
+  let selected = ymdOf(new Date());
+
+  const load = async () => {
+    const rows = await api("/api/settings/special-days").catch(() => []);
+    days = new Map((rows || []).map((r) => [r.day, r]));
+    paint();
+  };
+
+  const paint = () => {
+    box.classList.remove("muted");
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const total = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+    const today = ymdOf(new Date());
+    const monthLabel = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+    const cells = [];
+    for (let i = 0; i < first.getDay(); i++) cells.push(`<div></div>`);
+    for (let d = 1; d <= total; d++) {
+      const key = ymdOf(new Date(cursor.getFullYear(), cursor.getMonth(), d));
+      const row = days.get(key);
+      const cls = ["rep-cal-day"];
+      if (row) cls.push("has-records");
+      if (key === today) cls.push("is-today");
+      if (key === selected) cls.push("is-selected");
+      const note = row ? (row.is_closed ? "Closed" : `${row.open_time}–${row.close_time}`) : "";
+      cells.push(`<button type="button" class="${cls.join(" ")}" data-day="${key}"
+        title="${esc(row?.reason || note || "")}">${d}
+        <span class="rep-cal-count">${esc(note)}</span></button>`);
+    }
+
+    const cur = days.get(selected) || null;
+    box.innerHTML = `
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <button class="ghost" id="spPrev" type="button">‹</button>
+        <strong>${esc(monthLabel)}</strong>
+        <button class="ghost" id="spNext" type="button">›</button>
+      </div>
+      <div class="rep-cal-grid">
+        ${["S", "M", "T", "W", "T", "F", "S"].map((d) => `<div class="rep-cal-dow">${d}</div>`).join("")}
+        ${cells.join("")}
+      </div>
+      <div style="margin-top:1rem;border-top:1px solid var(--line);padding-top:.8rem">
+        <div class="row" style="gap:.6rem;flex-wrap:wrap;align-items:end">
+          <label>Date<input type="date" id="spDate" value="${esc(selected)}" /></label>
+          <label>Reason
+            <input id="spReason" maxlength="160" placeholder="Holiday, exam day, maintenance…"
+              value="${esc(cur?.reason || "")}" /></label>
+          <label style="align-self:center"><input type="checkbox" id="spClosed"
+            ${!cur || cur.is_closed ? "checked" : ""} /> Closed all day</label>
+          <label>Opening<input type="time" id="spOpen" value="${esc(cur?.open_time || "09:00")}" /></label>
+          <label>Closing<input type="time" id="spClose" value="${esc(cur?.close_time || "18:00")}" /></label>
+          <label style="align-self:center"><input type="checkbox" id="spAuto"
+            ${!cur || cur.auto_exit ? "checked" : ""} /> Auto exit</label>
+        </div>
+        <div class="row" style="margin-top:.8rem">
+          <button id="spSave" type="button">Save this day</button>
+          ${cur ? `<button class="ghost" id="spDelete" type="button">Remove override</button>` : ""}
+        </div>
+      </div>
+      ${days.size ? `<table style="margin-top:1rem"><thead><tr><th>Date</th><th>Status</th><th>Reason</th></tr></thead>
+        <tbody>${[...days.values()].map((r) => `<tr><td>${esc(r.day)}</td>
+          <td>${r.is_closed ? "Closed" : `${esc(r.open_time)} – ${esc(r.close_time)}`}</td>
+          <td>${esc(r.reason || "—")}</td></tr>`).join("")}</tbody></table>`
+        : `<p class="muted" style="margin-top:1rem">No special days added yet.</p>`}`;
+
+    const toggleTimes = () => {
+      const off = box.querySelector("#spClosed").checked;
+      box.querySelector("#spOpen").disabled = off;
+      box.querySelector("#spClose").disabled = off;
+    };
+    box.querySelector("#spClosed").onchange = toggleTimes;
+    toggleTimes();
+
+    box.querySelector("#spPrev").onclick = () => { cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1); paint(); };
+    box.querySelector("#spNext").onclick = () => { cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1); paint(); };
+    for (const btn of box.querySelectorAll(".rep-cal-day")) {
+      btn.onclick = () => { selected = btn.dataset.day; paint(); };
+    }
+    box.querySelector("#spDate").onchange = (e) => {
+      if (!e.target.value) return;
+      selected = e.target.value;
+      cursor = new Date(`${selected}T00:00:00`);
+      cursor.setDate(1);
+      paint();
+    };
+
+    box.querySelector("#spSave").onclick = async () => {
+      try {
+        await api("/api/settings/special-days", {
+          method: "PUT",
+          body: {
+            day: box.querySelector("#spDate").value,
+            reason: box.querySelector("#spReason").value,
+            is_closed: box.querySelector("#spClosed").checked ? 1 : 0,
+            open_time: box.querySelector("#spOpen").value || "09:00",
+            close_time: box.querySelector("#spClose").value || "18:00",
+            auto_exit: box.querySelector("#spAuto").checked ? 1 : 0,
+          },
+        });
+        toast("Calendar day saved");
+        await load();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+    const del = box.querySelector("#spDelete");
+    if (del) del.onclick = async () => {
+      try {
+        await api(`/api/settings/special-days/${selected}`, { method: "DELETE" });
+        toast("Override removed");
+        await load();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  };
+
+  load();
+}
+
+
 
 /* ---------------- Staff with access ---------------- */
 

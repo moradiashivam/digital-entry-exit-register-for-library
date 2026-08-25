@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { q, one, uuid, today, plusYear } from "../db.js";
+import { pool, q, one, uuid, today, plusYear } from "../db.js";
 import { requireAuth, withInstitute, canViewReports, logAudit } from "../auth.js";
 import { requireModule, requireWrite, requireBulk } from "../access.js";
 import { savePhoto, deletePhoto } from "../photos.js";
@@ -160,6 +160,10 @@ router.delete("/:id", withInstitute(), requireModule("members"), requireWrite, a
  * Bulk import rows parsed from Excel/CSV in the browser.
  * The CSV only carries the per-member columns; course / department / academic year /
  * photo and consent come from `defaults` chosen in the import screen and apply to every row.
+ *
+ * The screen uploads the file in small chunks so it can draw a live progress bar.
+ * Every chunk carries the same `batch_id` (and `row_offset` so error row numbers stay
+ * correct); the import history row is created on the first chunk and topped up after each one.
  */
 router.post("/bulk", withInstitute(), requireModule("members"), requireWrite, requireBulk, async (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
@@ -167,82 +171,149 @@ router.post("/bulk", withInstitute(), requireModule("members"), requireWrite, re
   const d = req.body?.defaults || {};
   // "skip" keeps the existing member, "overwrite" updates it from the CSV.
   const duplicateMode = req.body?.duplicate_mode === "overwrite" ? "overwrite" : "skip";
-  const batchId = uuid();
+  const given = String(req.body?.batch_id || "");
+  const batchId = /^[0-9a-f-]{36}$/i.test(given) ? given : uuid();
+  const rowOffset = Number(req.body?.row_offset) || 0;
+  const isLast = req.body?.is_last !== false;
   const results = [];
   let created = 0, updated = 0, skipped = 0, duplicates = 0;
 
+  // 1) Validate + normalise every row up front (no database work here).
+  const prepared = [];
+  const seen = new Set();
   for (const [index, row] of rows.entries()) {
     const error = validate(row);
     if (error) {
-      results.push({ row: index + 2, member_code: row?.member_code || "", error });
+      results.push({ row: rowOffset + index + 2, member_code: row?.member_code || "", error });
       continue;
     }
     const code = String(row.member_code).trim();
-    const values = {
-      full_name: String(row.full_name).trim(),
-      course_id: clean(d.course_id),
-      department_id: clean(d.department_id),
-      academic_year_id: clean(d.academic_year_id),
-      gender: row.gender || d.gender || "Other",
-      designation: clean(row.designation) || clean(d.designation) || "Student",
-      mobile: clean(String(row.mobile ?? "").trim()),
-      email: clean(String(row.email ?? "").trim()),
-      rfid_uid: clean(row.rfid_uid),
-      valid_from: normalizeDate(row.valid_from) || normalizeDate(d.valid_from) || today(),
-      valid_to: normalizeDate(row.valid_to) || normalizeDate(d.valid_to) || plusYear(),
-      status: row.status || d.status || "Active",
-      consent_given: (row.consent_given ?? d.consent_given) ? 1 : 0,
-    };
+    if (seen.has(code)) {
+      // The same code twice in one chunk — treat the later one like a duplicate.
+      duplicates += 1;
+      if (duplicateMode === "skip") { skipped += 1; continue; }
+    }
+    seen.add(code);
+    prepared.push({
+      rowNumber: rowOffset + index + 2,
+      code,
+      values: {
+        full_name: String(row.full_name).trim(),
+        course_id: clean(d.course_id),
+        department_id: clean(d.department_id),
+        academic_year_id: clean(d.academic_year_id),
+        gender: row.gender || d.gender || "Other",
+        designation: clean(row.designation) || clean(d.designation) || "Student",
+        mobile: clean(String(row.mobile ?? "").trim()),
+        email: clean(String(row.email ?? "").trim()),
+        rfid_uid: clean(row.rfid_uid),
+        valid_from: normalizeDate(row.valid_from) || normalizeDate(d.valid_from) || today(),
+        valid_to: normalizeDate(row.valid_to) || normalizeDate(d.valid_to) || plusYear(),
+        status: row.status || d.status || "Active",
+        consent_given: (row.consent_given ?? d.consent_given) ? 1 : 0,
+      },
+    });
+  }
 
-    try {
-      const existing = await one(
-        "SELECT id FROM members WHERE institute_id = ? AND member_code = ?",
-        [req.institute.id, code],
-      );
-      if (existing) {
+  const photoUrl = clean(d.photo_url);
+  const COLUMNS = ["id", "institute_id", "member_code", "full_name", "course_id", "department_id",
+    "academic_year_id", "gender", "designation", "mobile", "email", "photo_url", "rfid_uid",
+    "valid_from", "valid_to", "status", "source", "consent_given", "import_batch_id"];
+
+  const tuple = (item) => {
+    const v = item.values;
+    return [uuid(), req.institute.id, item.code, v.full_name, v.course_id, v.department_id,
+      v.academic_year_id, v.gender, v.designation, v.mobile, v.email, photoUrl, v.rfid_uid,
+      v.valid_from, v.valid_to, v.status, "excel_import", v.consent_given, batchId];
+  };
+
+  const INSERT_SQL = `INSERT INTO members (${COLUMNS.join(", ")}) VALUES ?`;
+  // Overwrite mode: same statement, but existing (institute_id, member_code) rows are updated.
+  const UPSERT_SQL = `${INSERT_SQL}
+    ON DUPLICATE KEY UPDATE
+      full_name = VALUES(full_name), course_id = VALUES(course_id),
+      department_id = VALUES(department_id), academic_year_id = VALUES(academic_year_id),
+      gender = VALUES(gender), designation = VALUES(designation),
+      mobile = VALUES(mobile), email = VALUES(email), rfid_uid = VALUES(rfid_uid),
+      valid_from = VALUES(valid_from), valid_to = VALUES(valid_to),
+      status = VALUES(status), consent_given = VALUES(consent_given)`;
+
+  if (prepared.length) {
+    // 2) One lookup for the whole chunk instead of one SELECT per row.
+    const existingRows = await pool.query(
+      "SELECT member_code FROM members WHERE institute_id = ? AND member_code IN (?)",
+      [req.institute.id, prepared.map((p) => p.code)],
+    ).then(([r]) => r);
+    const existing = new Set(existingRows.map((r) => String(r.member_code)));
+
+    const fresh = [];
+    const dupes = [];
+    for (const item of prepared) {
+      if (existing.has(item.code)) {
         duplicates += 1;
         if (duplicateMode === "skip") { skipped += 1; continue; }
-        const fields = Object.keys(values);
-        await q(
-          `UPDATE members SET ${fields.map((f) => `${f} = ?`).join(", ")} WHERE id = ?`,
-          [...fields.map((f) => values[f]), existing.id],
-        );
-        updated += 1;
-        continue;
+        dupes.push(item);
+      } else {
+        fresh.push(item);
       }
-      await q(
-        `INSERT INTO members (id, institute_id, member_code, full_name, course_id, department_id,
-           academic_year_id, gender, designation, mobile, email, photo_url, rfid_uid, valid_from, valid_to,
-           status, source, consent_given, import_batch_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'excel_import', ?, ?)`,
-        [uuid(), req.institute.id, code, values.full_name, values.course_id, values.department_id,
-         values.academic_year_id, values.gender, values.designation, values.mobile, values.email, clean(d.photo_url),
-         values.rfid_uid, values.valid_from, values.valid_to, values.status, values.consent_given, batchId],
-      );
-      created += 1;
-    } catch (e) {
-      results.push({
-        row: index + 2, member_code: code,
-        error: e.code === "ER_DUP_ENTRY" ? "Duplicate RFID card UID" : e.message,
-      });
+    }
+
+    // 3) Write the whole chunk in one transaction with multi-row statements.
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      if (fresh.length) await conn.query(INSERT_SQL, [fresh.map(tuple)]);
+      if (dupes.length) await conn.query(UPSERT_SQL, [dupes.map(tuple)]);
+      await conn.commit();
+      created += fresh.length;
+      updated += dupes.length;
+    } catch (batchError) {
+      // A bad row (e.g. duplicate RFID) fails the whole batch — replay row by row
+      // so the import screen can still point at the exact rows that need fixing.
+      try { await conn.rollback(); } catch { /* connection already reset */ }
+      for (const item of [...fresh, ...dupes]) {
+        try {
+          await conn.query(existing.has(item.code) ? UPSERT_SQL : INSERT_SQL, [[tuple(item)]]);
+          if (existing.has(item.code)) updated += 1; else created += 1;
+        } catch (e) {
+          results.push({
+            row: item.rowNumber, member_code: item.code,
+            error: e.code === "ER_DUP_ENTRY" ? "Duplicate RFID card UID" : (e.message || batchError.message),
+          });
+        }
+      }
+    } finally {
+      conn.release();
     }
   }
 
+
+  // One history row per file — each chunk adds its own counts to it.
   await q(
     `INSERT INTO bulk_import_logs (id, institute_id, admin_id, admin_email, file_name, total_rows,
        success_count, error_count, duplicate_count, updated_count, skipped_count)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE
+       total_rows = total_rows + VALUES(total_rows),
+       success_count = success_count + VALUES(success_count),
+       error_count = error_count + VALUES(error_count),
+       duplicate_count = duplicate_count + VALUES(duplicate_count),
+       updated_count = updated_count + VALUES(updated_count),
+       skipped_count = skipped_count + VALUES(skipped_count)`,
     [batchId, req.institute.id, req.user.id, req.user.email, fileName, rows.length,
      created, results.length, duplicates, updated, skipped],
   );
-  await logAudit(req, req.institute.id, "member.bulk_import", "members", batchId, {
-    fileName, created, updated, skipped, duplicates, failed: results.length, duplicateMode,
-  });
+  if (isLast) {
+    await logAudit(req, req.institute.id, "member.bulk_import", "members", batchId, {
+      fileName, duplicateMode,
+    });
+  }
   res.json({
     batch_id: batchId, total: rows.length, success: created, imported: created,
     updated, skipped, duplicates, failed: results.length, errors: results,
   });
 });
+
 
 /**
  * Bulk delete members by id. Permanent — scan history and palm templates cascade away.

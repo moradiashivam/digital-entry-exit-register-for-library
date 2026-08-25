@@ -284,6 +284,9 @@ body.light .accent-option:hover { background: #0000000a; }
 .rep-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: .6rem; }
 .rep-cal-dow { text-align: center; font-size: .72rem; color: var(--muted, #93a0c8); }
 .rep-cal-day {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--line);
   padding: .32rem 0; text-align: center; border-radius: 10px; font-size: .8rem; line-height: 1.15;
   display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 34px;
   transition: background .15s ease, color .15s ease, transform .12s ease, border-color .15s ease;
@@ -293,8 +296,8 @@ body.light .accent-option:hover { background: #0000000a; }
 .rep-cal-day.has-records { border-color: color-mix(in srgb, var(--brand) 45%, var(--line)); }
 .rep-cal-day.is-today { outline: 1px solid var(--brand); }
 .rep-cal-day.is-selected {
-  background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 25%, transparent);
+  background: transparent; border: 2px solid var(--brand); color: var(--brand); font-weight: 600;
+  box-shadow: none;
 }
 .rep-cal-day.is-selected .rep-cal-count { opacity: .9; }
 

@@ -1,5 +1,6 @@
 import { q } from "./db.js";
 import { sendMail, smtpConfigured } from "./mailer.js";
+import { runGithubCheckJob } from "./github-update.js";
 
 const setting = async (key, fallback) => {
   const rows = await q("SELECT setting_value FROM platform_settings WHERE setting_key = ?", [key]);
@@ -71,6 +72,12 @@ export async function autoExitInstitute(instituteId) {
   if (!hours.length) return 0;
   const byDay = new Map(hours.map((h) => [Number(h.weekday), h]));
 
+  // Calendar overrides (holidays / custom timings) win over the weekly rule.
+  const special = await q("SELECT * FROM library_special_days WHERE institute_id = ?", [instituteId])
+    .catch(() => []);
+  const byDate = new Map(special.map((s) => [String(s.day).slice(0, 10), s]));
+  const dateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
   // Latest log per member — an "Entry" means they are still inside.
   const open = await q(
     `SELECT l.member_id, l.occurred_at
@@ -87,7 +94,7 @@ export async function autoExitInstitute(instituteId) {
   for (const row of open) {
     const entry = new Date(row.occurred_at);
     if (Number.isNaN(entry.getTime())) continue;
-    const rule = byDay.get(entry.getDay());
+    const rule = byDate.get(dateKey(entry)) || byDay.get(entry.getDay());
     if (!rule || !Number(rule.auto_exit) || Number(rule.is_closed)) continue;
 
     const [oh, om] = String(rule.open_time).split(":").map(Number);
@@ -141,4 +148,15 @@ export function startScheduler() {
       .catch((e) => console.error("  auto-exit job failed:", e.message));
   setTimeout(autoExit, 8000);
   setInterval(autoExit, 5 * 60 * 1000).unref?.();
+
+  // Daily GitHub release check (the helper itself only calls GitHub once a day).
+  const releaseCheck = () =>
+    runGithubCheckJob()
+      .then((r) => {
+        if (r.error) console.error("  update check failed:", r.error);
+        else if (r.available) console.log(`  update available on GitHub: ${r.latest}`);
+      })
+      .catch((e) => console.error("  update check failed:", e.message));
+  setTimeout(releaseCheck, 12000);
+  setInterval(releaseCheck, 60 * 60 * 1000).unref?.();
 }

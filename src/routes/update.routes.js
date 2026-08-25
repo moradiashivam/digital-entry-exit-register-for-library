@@ -8,6 +8,7 @@ import path from "node:path";
 import { q, one, localDateTime } from "../db.js";
 import { requireAuth, requireOwner, logAudit } from "../auth.js";
 import { installPackage, inspectPackage, currentVersion, rollbackTo, APP_ROOT, BACKUP_ROOT } from "../updater.js";
+import { getUpdateStatus, installLatestRelease } from "../github-update.js";
 
 const router = Router();
 router.use(requireAuth, requireOwner);
@@ -52,6 +53,35 @@ router.get("/status", async (_req, res) => {
     migration_counts: { applied: Number(counts?.ok || 0), failed: Number(counts?.failed || 0) },
     backups,
   });
+});
+
+/** GitHub release check — cached, refreshed at most once a day. */
+router.get("/github", async (_req, res) => {
+  try {
+    res.json(await getUpdateStatus());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Force a fresh check against the GitHub releases API. */
+router.post("/github/check", async (_req, res) => {
+  try {
+    res.json(await getUpdateStatus({ force: true }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** One-click: download the latest release, back up, extract, migrate. */
+router.post("/github/install", async (req, res) => {
+  const result = await installLatestRelease({ adminEmail: req.user.email });
+  await logAudit(req, null, result.ok ? "app_update_success" : "app_update_failed", "app_updates", result.id || null, {
+    source: "github",
+    tag: result.tag || null,
+    error: result.error || null,
+  }).catch(() => {});
+  res.status(result.ok ? 200 : 500).json(result);
 });
 
 /** Every upgrade attempt, newest first. */

@@ -181,11 +181,13 @@ async function boot() {
   if (settings.show_clock === 0) el("clock").hidden = true; else startClock();
 
   if (!data.subscription_active) {
-    const suspended = data.kiosk_disabled_reason === "suspended";
-    el("result").innerHTML = `<div class="result bad"><h2>Kiosk disabled</h2>
-      <p>${suspended
-        ? "This university's account is suspended. Scanning resumes once the administrator re-activates it."
-        : "This university's subscription has ended. Scanning resumes once the subscription is extended."}</p></div>`;
+    const why = data.kiosk_disabled_reason;
+    const text = why === "suspended"
+      ? "This university's account is suspended. Scanning resumes once the administrator re-activates it."
+      : why === "inactive"
+        ? "This terminal is switched off. Tick “Active” for it under Master Setting → Kiosks / terminals."
+        : "This university's subscription has ended. Scanning resumes once the subscription is extended.";
+    el("result").innerHTML = `<div class="result bad"><h2>Kiosk disabled</h2><p>${text}</p></div>`;
     el("scanForm").hidden = true;
     return;
   }
@@ -208,6 +210,52 @@ el("scanForm").addEventListener("submit", (e) => {
   el("code").value = "";
   submitScan(value, method);
 });
+
+/* ---------- USB / hand-held barcode scanner (keyboard wedge) ----------
+   Hand-held scanners type the code very fast and usually end with Enter.
+   We buffer fast keystrokes anywhere on the kiosk page and auto-submit,
+   so staff never have to click the input or press a button. */
+let wedgeBuffer = "";
+let wedgeLastKey = 0;
+let wedgeIdleTimer = null;
+const WEDGE_MAX_GAP_MS = 60;   // slower than this = a human typing
+const WEDGE_IDLE_MS = 120;     // submit if the scanner sends no Enter
+const WEDGE_MIN_LENGTH = 3;
+
+function wedgeSubmit() {
+  clearTimeout(wedgeIdleTimer);
+  const value = wedgeBuffer.trim();
+  wedgeBuffer = "";
+  if (value.length < WEDGE_MIN_LENGTH) return;
+  const input = el("code");
+  if (input) input.value = "";
+  // A wedge scanner reads the printed barcode on the ID card.
+  submitScan(value, method === "RFID" ? "RFID" : "Barcode");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const now = Date.now();
+  const gap = now - wedgeLastKey;
+  wedgeLastKey = now;
+
+  if (e.key === "Enter") {
+    if (wedgeBuffer.length >= WEDGE_MIN_LENGTH && gap < WEDGE_MAX_GAP_MS * 4) {
+      e.preventDefault();
+      wedgeSubmit();
+    } else {
+      wedgeBuffer = "";
+    }
+    return;
+  }
+  if (e.key.length !== 1) return;
+
+  if (gap > WEDGE_MAX_GAP_MS) wedgeBuffer = "";
+  wedgeBuffer += e.key;
+  clearTimeout(wedgeIdleTimer);
+  wedgeIdleTimer = setTimeout(wedgeSubmit, WEDGE_IDLE_MS);
+});
+
 
 async function submitScan(value, methodUsed) {
   clearTimeout(resetTimer);
