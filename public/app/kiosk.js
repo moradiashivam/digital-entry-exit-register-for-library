@@ -1,4 +1,5 @@
 import { esc } from "/app/api.js";
+import { templateCss } from "/app/kiosk-templates.js";
 
 const slug = location.pathname.split("/").filter(Boolean)[1] || "";
 // ?device=main-gate pins this screen to a named kiosk and remembers it on this computer.
@@ -14,6 +15,12 @@ const el = (id) => document.getElementById(id);
 let settings = {};
 let method = "Manual";
 let resetTimer = null;
+
+function applyTemplate(id) {
+  const style = document.getElementById("kioskTemplateCss");
+  document.body.dataset.template = id || "classic";
+  if (style) style.textContent = templateCss(id);
+}
 
 function applyCustomCss(css) {
   let style = document.getElementById("kioskCustomCss");
@@ -161,6 +168,7 @@ async function boot() {
     localStorage.setItem(`ler_device_${slug}`, deviceId);
   }
   document.body.classList.toggle("light", settings.theme === "light");
+  applyTemplate(settings.kiosk_template);
   applyCustomCss(settings.custom_css);
   el("institution").textContent = settings.institution_name || data.institute.name;
   el("title").textContent = settings.kiosk_title || "Library Entry Kiosk";

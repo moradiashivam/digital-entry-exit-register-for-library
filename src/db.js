@@ -19,6 +19,7 @@ export const pool = mysql.createPool({
   database: process.env.DB_NAME || "library_register",
   waitForConnections: true,
   connectionLimit: 10,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
   dateStrings: true,
   timezone: "local",
 });
@@ -90,6 +91,7 @@ export async function ensureSchemaExtras() {
   const extras = [
     ["kiosk_settings", "theme", "ENUM('dark','light') NOT NULL DEFAULT 'light'"],
     ["kiosk_settings", "custom_css", "TEXT NULL"],
+    ["kiosk_settings", "kiosk_template", "VARCHAR(40) NOT NULL DEFAULT 'classic'"],
     ["kiosk_settings", "multi_kiosk_transfer", "TINYINT(1) NOT NULL DEFAULT 1"],
     ["institutes", "code", "VARCHAR(40) NULL"],
     ["institutes", "plan_id", "CHAR(36) NULL"],

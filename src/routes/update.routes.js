@@ -9,6 +9,7 @@ import { q, one, localDateTime } from "../db.js";
 import { requireAuth, requireOwner, logAudit } from "../auth.js";
 import { installPackage, inspectPackage, currentVersion, rollbackTo, APP_ROOT, BACKUP_ROOT } from "../updater.js";
 import { getUpdateStatus, installLatestRelease } from "../github-update.js";
+import { recordInstalledVersion } from "../version.js";
 
 const router = Router();
 router.use(requireAuth, requireOwner);
@@ -55,7 +56,30 @@ router.get("/status", async (_req, res) => {
   });
 });
 
+/**
+ * Correct the recorded installed version. Without a body it is synced to the
+ * latest GitHub release tag (useful after updating the files by hand); with
+ * `{ version }` the owner sets it explicitly.
+ */
+router.post("/version", async (req, res) => {
+  try {
+    let value = req.body?.version;
+    if (!value) {
+      const gh = await getUpdateStatus({ force: true });
+      value = gh.latest_version;
+      if (!value) return res.status(400).json({ error: "GitHub did not return a release tag." });
+    }
+    const saved = await recordInstalledVersion(value);
+    if (!saved) return res.status(400).json({ error: "Enter a version like 1.2.0." });
+    await logAudit(req, null, "app_version_set", "app_updates", null, { version: saved }).catch(() => {});
+    res.json({ ok: true, version: await currentVersion() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /** GitHub release check — cached, refreshed at most once a day. */
+
 router.get("/github", async (_req, res) => {
   try {
     res.json(await getUpdateStatus());

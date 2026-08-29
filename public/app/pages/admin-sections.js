@@ -548,3 +548,119 @@ export function sip2Panel(box, { api, esc, toast }) {
     box.querySelector("#sipBox").textContent = "SIP2 settings unavailable.";
   });
 }
+
+/* ---------------- PDF header & footer (report exports only) ---------------- */
+
+/**
+ * Upload / preview / remove the header and footer used when a report is
+ * exported to PDF. Nothing here changes how any web page looks on screen.
+ */
+export function pdfBrandingPanel(box, { api, esc, toast }) {
+  let cfg = null;
+
+  const readFile = (file, asImage) => new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("Could not read that file"));
+    fr.onload = () => resolve(String(fr.result || ""));
+    if (asImage) fr.readAsDataURL(file);
+    else fr.readAsText(file);
+  });
+
+  const previewHtml = (type, content) => {
+    if (type === "image" && content) return `<img src="${esc(content)}" alt="" style="max-width:100%;display:block" />`;
+    if (type === "html" && content) return `<div class="pdf-brand-preview-html">${content}</div>`;
+    return `<p class="muted" style="margin:0">Nothing uploaded yet.</p>`;
+  };
+
+  const section = (side, label) => {
+    const type = cfg[`${side}_type`] || "none";
+    const content = cfg[`${side}_content`] || "";
+    return `
+      <div>
+        <h4 style="margin:0 0 .4rem">${label}</h4>
+        <div class="row" style="gap:.6rem;flex-wrap:wrap;align-items:flex-end">
+          <label style="flex:1;min-width:200px">Upload HTML or JPG/PNG
+            <input type="file" id="${side}_file" accept=".html,.htm,text/html,image/jpeg,image/png" /></label>
+          <label style="width:150px">Reserved height (mm)
+            <input type="number" id="${side}_h" min="5" max="80" value="${esc(String(cfg[`${side}_height_mm`] || (side === "header" ? 25 : 18)))}" /></label>
+          <button class="ghost" id="${side}_clear" ${type === "none" ? "disabled" : ""}>Remove</button>
+        </div>
+        <p class="muted" style="margin:.4rem 0 .3rem">Current: ${type === "none" ? "not configured" : esc(type === "image" ? "image file" : "HTML file")}</p>
+        <div class="pdf-brand-preview" style="border:1px solid var(--line);border-radius:8px;padding:.6rem;background:#fff;color:#111;overflow:auto;max-height:220px">
+          ${previewHtml(type, content)}
+        </div>
+      </div>`;
+  };
+
+  const paint = () => {
+    box.classList.remove("muted");
+    box.innerHTML = `
+      <div class="panel">
+        <div class="panel-head">
+          <h3 style="margin:0">PDF header &amp; footer</h3>
+          <p class="muted">Used only when a report is exported to PDF from the Reports page.
+            Web pages and the kiosk stay exactly as they are.</p>
+        </div>
+        <label class="row" style="gap:.4rem;margin:.4rem 0 .9rem">
+          <input type="checkbox" id="pdf_enabled" ${Number(cfg.enabled) ? "checked" : ""} />
+          Enable header &amp; footer for PDF exports
+        </label>
+        <div class="grid cols-2" style="gap:1rem">
+          ${section("header", "Header")}
+          ${section("footer", "Footer")}
+        </div>
+        <div class="row" style="margin-top:1rem;gap:.6rem">
+          <button class="primary" id="pdf_save">Save header &amp; footer</button>
+        </div>
+      </div>`;
+    bind();
+  };
+
+  const bind = () => {
+    for (const side of ["header", "footer"]) {
+      box.querySelector(`#${side}_file`).onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const isImage = /^image\//.test(file.type) || /\.(jpe?g|png)$/i.test(file.name);
+        if (file.size > 3 * 1024 * 1024) return toast("Please keep the file under 3 MB", true);
+        try {
+          cfg[`${side}_content`] = await readFile(file, isImage);
+          cfg[`${side}_type`] = isImage ? "image" : "html";
+          paint();
+          toast(`${side === "header" ? "Header" : "Footer"} loaded — remember to save`);
+        } catch (err) { toast(err.message, true); }
+      };
+      box.querySelector(`#${side}_clear`).onclick = () => {
+        cfg[`${side}_type`] = "none";
+        cfg[`${side}_content`] = "";
+        paint();
+      };
+    }
+
+    box.querySelector("#pdf_save").onclick = async (e) => {
+      e.target.disabled = true;
+      const body = {
+        enabled: box.querySelector("#pdf_enabled").checked,
+        header_type: cfg.header_type,
+        header_content: cfg.header_content,
+        header_height_mm: Number(box.querySelector("#header_h").value) || 25,
+        footer_type: cfg.footer_type,
+        footer_content: cfg.footer_content,
+        footer_height_mm: Number(box.querySelector("#footer_h").value) || 18,
+      };
+      try {
+        cfg = await api("/api/settings/pdf-branding", { method: "PUT", body });
+        toast("PDF header & footer saved");
+        paint();
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        e.target.disabled = false;
+      }
+    };
+  };
+
+  api("/api/settings/pdf-branding")
+    .then((r) => { cfg = r || {}; paint(); })
+    .catch(() => { box.textContent = "Could not load PDF header & footer settings."; });
+}

@@ -11,7 +11,7 @@ router.use(requireAuth);
 
 const FIELDS = [
   "institution_name", "kiosk_title", "logo_url", "welcome_message", "entry_label", "exit_label",
-  "footer_note", "theme", "custom_css", "allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "result_seconds", "timezone", "multi_kiosk_transfer",
+  "footer_note", "theme", "kiosk_template", "custom_css", "allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "result_seconds", "timezone", "multi_kiosk_transfer",
 ];
 const BOOLS = new Set(["allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "multi_kiosk_transfer"]);
 
@@ -162,6 +162,71 @@ router.delete("/special-days/:day", withInstitute(), requireModule("kiosks"), re
 router.post("/hours/auto-exit", withInstitute(), requireModule("kiosks"), requireWrite, async (req, res) => {
   const closed = await autoExitInstitute(req.institute.id);
   res.json({ closed });
+});
+
+
+/* ---------------- PDF header / footer branding (report exports only) ---------------- */
+
+const PDF_DEFAULTS = {
+  enabled: 0,
+  header_type: "none",
+  header_content: null,
+  header_height_mm: 25,
+  footer_type: "none",
+  footer_content: null,
+  footer_height_mm: 18,
+};
+
+const pdfPart = (type, content) => {
+  const t = ["none", "html", "image"].includes(type) ? type : "none";
+  if (t === "none") return { type: "none", content: null };
+  const value = String(content ?? "").trim();
+  if (!value) return { type: "none", content: null };
+  if (t === "image" && !/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(value)) {
+    const err = new Error("Upload a JPG or PNG image file");
+    err.status = 400;
+    throw err;
+  }
+  return { type: t, content: value.slice(0, 4 * 1024 * 1024) };
+};
+
+const mm = (v, fallback) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(80, Math.max(5, Math.round(n))) : fallback;
+};
+
+router.get("/pdf-branding", withInstitute(isMember), async (req, res) => {
+  const row = await one("SELECT * FROM pdf_branding WHERE institute_id = ?", [req.institute.id]);
+  res.json(row ? { ...row, enabled: Number(row.enabled) ? 1 : 0 } : { institute_id: req.institute.id, ...PDF_DEFAULTS });
+});
+
+router.put("/pdf-branding", withInstitute(), requireWrite, async (req, res, next) => {
+  try {
+    const header = pdfPart(req.body?.header_type, req.body?.header_content);
+    const footer = pdfPart(req.body?.footer_type, req.body?.footer_content);
+    const patch = {
+      enabled: req.body?.enabled ? 1 : 0,
+      header_type: header.type,
+      header_content: header.content,
+      header_height_mm: mm(req.body?.header_height_mm, 25),
+      footer_type: footer.type,
+      footer_content: footer.content,
+      footer_height_mm: mm(req.body?.footer_height_mm, 18),
+    };
+    const keys = Object.keys(patch);
+    await q(
+      `INSERT INTO pdf_branding (institute_id, ${keys.join(", ")})
+       VALUES (?, ${keys.map(() => "?").join(", ")})
+       ON DUPLICATE KEY UPDATE ${keys.map((k) => `${k} = VALUES(${k})`).join(", ")}`,
+      [req.institute.id, ...keys.map((k) => patch[k])],
+    );
+    await logAudit(req, req.institute.id, "settings.pdf_branding_update", "pdf_branding", req.institute.id, {
+      enabled: patch.enabled, header_type: patch.header_type, footer_type: patch.footer_type,
+    });
+    res.json({ institute_id: req.institute.id, ...patch });
+  } catch (e) {
+    next(e);
+  }
 });
 
 

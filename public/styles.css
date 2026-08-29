@@ -418,3 +418,11 @@ body.light .accent-option:hover { background: #0000000a; }
 .hours-table { width: 100%; }
 .hours-table input[type="time"] { width: 100%; padding: .35rem .45rem; }
 .hours-table td, .hours-table th { text-align: left; }
+
+/* Kiosk template picker */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .6rem; }
+.template-option { display: flex; flex-direction: column; gap: .25rem; text-align: left; padding: .75rem .85rem;
+  background: transparent; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.template-option.active { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }
+.template-name { font-weight: 600; }
+.template-desc { font-size: .78rem; line-height: 1.35; }

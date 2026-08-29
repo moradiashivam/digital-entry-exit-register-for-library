@@ -67,3 +67,18 @@ CREATE TABLE IF NOT EXISTS library_special_days (
   PRIMARY KEY (institute_id, day),
   CONSTRAINT fk_specialday_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PDF export branding: optional header / footer used only by report PDF exports.
+CREATE TABLE IF NOT EXISTS pdf_branding (
+  institute_id CHAR(36) NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  header_type ENUM('none','html','image') NOT NULL DEFAULT 'none',
+  header_content LONGTEXT NULL,
+  header_height_mm INT NOT NULL DEFAULT 25,
+  footer_type ENUM('none','html','image') NOT NULL DEFAULT 'none',
+  footer_content LONGTEXT NULL,
+  footer_height_mm INT NOT NULL DEFAULT 18,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (institute_id),
+  CONSTRAINT fk_pdfbrand_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

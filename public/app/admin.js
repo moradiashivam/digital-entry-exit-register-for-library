@@ -15,6 +15,7 @@ import { renderOwnerBilling } from "/app/pages/owner-billing.js";
 import { renderOwnerLeads } from "/app/pages/owner-leads.js";
 import { renderOwnerSettings } from "/app/pages/owner-settings.js";
 import { renderOwnerSite } from "/app/pages/owner-site.js";
+import { renderOwnerSeo } from "/app/pages/owner-seo.js";
 import { renderOwnerUpdate } from "/app/pages/owner-update.js";
 import { renderOwnerDocs, renderAdminDocs } from "/app/pages/docs.js";
 import { mountThemeToggle, mountTextSize, initAppearance } from "/app/theme.js";
@@ -61,6 +62,7 @@ const OWNER_PAGES = {
   leads: { title: "Leads (CRM)", subtitle: "Enquiries, follow-ups and conversions", render: renderOwnerLeads },
   provisioning: { title: "Provision access", subtitle: "Create universities and issue admin logins", render: renderInstitutes },
   website: { title: "Website", subtitle: "Public home & contact pages, branding and custom HTML/CSS", render: renderOwnerSite },
+  seo: { title: "SEO", subtitle: "Rank the public site on Google, Bing and other search engines", render: renderOwnerSeo },
   application: { title: "Application management", subtitle: "Update the application, database upgrades, version and restart", render: renderOwnerUpdate },
   platform: { title: "System settings", subtitle: "Company, invoicing, email and audit trail", render: renderOwnerSettings },
   docs: { title: "Documentation", subtitle: "Complete guide for the platform owner", render: renderOwnerDocs },

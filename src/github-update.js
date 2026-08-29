@@ -6,51 +6,24 @@
  * download + install the release ZIP with the normal updater pipeline (backup →
  * extract → migrations → rollback on failure).
  */
-import { q, one, localDateTime } from "./db.js";
+import { localDateTime } from "./db.js";
 import { installPackage, currentVersion } from "./updater.js";
+import {
+  getSetting,
+  setSetting,
+  parseVersion,
+  compareVersions,
+  isNewer,
+  recordInstalledVersion,
+} from "./version.js";
+
+export { parseVersion, compareVersions, isNewer };
 
 export const GITHUB_REPO =
   process.env.GITHUB_REPO || "moradiashivam/digital-entry-exit-register-for-library";
 const RELEASE_URL = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-/* ------------------------------------------------------------------ *
- * Settings helpers (platform_settings is a simple key/value table)
- * ------------------------------------------------------------------ */
-const getSetting = async (key) => {
-  const row = await one("SELECT setting_value FROM platform_settings WHERE setting_key = ?", [key]);
-  return row?.setting_value ?? null;
-};
-
-const setSetting = async (key, value) => {
-  await q(
-    `INSERT INTO platform_settings (setting_key, setting_value) VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
-    [key, value == null ? null : String(value)],
-  );
-};
-
-/* ------------------------------------------------------------------ *
- * Semantic version comparison — "V3.9.0" < "V3.10.0"
- * ------------------------------------------------------------------ */
-export function parseVersion(value) {
-  const cleaned = String(value ?? "").trim().replace(/^[vV]/, "");
-  const [core] = cleaned.split(/[-+]/);
-  const parts = core.split(".").map((n) => Number.parseInt(n, 10));
-  return [0, 1, 2].map((i) => (Number.isFinite(parts[i]) ? parts[i] : 0));
-}
-
-/** -1 when a < b, 0 when equal, 1 when a > b. */
-export function compareVersions(a, b) {
-  const av = parseVersion(a);
-  const bv = parseVersion(b);
-  for (let i = 0; i < 3; i++) {
-    if (av[i] !== bv[i]) return av[i] < bv[i] ? -1 : 1;
-  }
-  return 0;
-}
-
-export const isNewer = (candidate, installed) => compareVersions(candidate, installed) > 0;
+const GITHUB_TIMEOUT_MS = Number(process.env.GITHUB_TIMEOUT_MS || 15000);
 
 /* ------------------------------------------------------------------ *
  * GitHub API
@@ -62,7 +35,20 @@ async function githubFetch(url, extraHeaders = {}) {
     ...extraHeaders,
   };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-  const res = await fetch(url, { headers, redirect: "follow" });
+  let res;
+  try {
+    res = await fetch(url, {
+      headers,
+      redirect: "follow",
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const code = String(error?.cause?.code || error?.code || "");
+    if (["ETIMEDOUT", "ECONNREFUSED", "ECONNRESET", "ENETUNREACH"].includes(code) || error?.name === "TimeoutError") {
+      throw new Error("GitHub is temporarily unreachable. Check the internet connection or firewall; the update check will retry automatically.");
+    }
+    throw error;
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`GitHub request failed [${res.status}] ${body.slice(0, 200)}`);
@@ -196,7 +182,10 @@ export async function installLatestRelease({ adminEmail } = {}) {
     const merged = steps.concat(result.steps || []);
 
     await setSetting("github_update_state", result.ok ? "Update Completed" : "Update Failed");
-    if (result.ok) await setSetting("github_installed_tag", release.tag);
+    if (result.ok) {
+      await setSetting("github_installed_tag", release.tag);
+      await recordInstalledVersion(release.tag);
+    }
 
     return { ...result, tag: release.tag, steps: merged };
   } catch (e) {

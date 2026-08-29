@@ -22,6 +22,7 @@ export const NAV_ICONS = {
   leads: svg('<path d="M4 5h16v12H8l-4 4z"/><path d="M8 10h8M8 13h5"/>'),
   provisioning: svg('<circle cx="10" cy="8" r="3.2"/><path d="M3.5 20a6.5 6.5 0 0 1 11 -4.7"/><path d="M18 14v6M15 17h6"/>'),
   website: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>'),
+  seo: svg('<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/><path d="M8 12.5 10.3 10l2 2L15 8.6"/>'),
   application: svg('<path d="M12 3v10"/><path d="m8 7 4-4 4 4"/><path d="M4 14v4a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-4"/><path d="M8 17h8"/>'),
   platform: svg('<path d="M12 3 4 6v5c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><circle cx="12" cy="11" r="2.2"/>'),
 };

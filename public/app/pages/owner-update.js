@@ -41,7 +41,18 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
           }</div></div>
         </div>
         <p class="muted">Application folder: <code>${esc(s.app_root)}</code></p>
+        <div class="row" style="align-items:flex-end">
+          <div>
+            <label>Set version manually</label>
+            <input id="verInput" placeholder="e.g. 3.10.0" value="${esc(s.version === "unknown" ? "" : s.version)}" />
+          </div>
+          <button class="ghost" id="verSave">Save version</button>
+          <button class="ghost" id="verSync">Sync from GitHub release</button>
+        </div>
+        <p class="muted" id="verInfo">The installed version updates automatically after every upgrade. Use these
+          only if you replaced the files by hand.</p>
       </div>
+
 
       <div class="panel" style="margin-top:1rem">
         <h3 style="margin-top:0">Automatic update from GitHub</h3>
@@ -159,6 +170,27 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
         })
         .join("");
     };
+
+    /* ---- Installed version (manual correction / GitHub sync) ---- */
+    const verInfo = view.querySelector("#verInfo");
+    const saveVersion = async (btn, body, busy) => {
+      btn.disabled = true;
+      verInfo.textContent = busy;
+      try {
+        const r = await api("/api/update/version", { method: "POST", body });
+        toast(`Installed version is now v${r.version}`);
+        await draw();
+      } catch (e) {
+        verInfo.textContent = e.message;
+        toast(e.message, true);
+        btn.disabled = false;
+      }
+    };
+    view.querySelector("#verSave").onclick = (ev) =>
+      saveVersion(ev.target, { version: view.querySelector("#verInput").value.trim() }, "Saving…");
+    view.querySelector("#verSync").onclick = (ev) =>
+      saveVersion(ev.target, {}, "Reading the latest release tag from GitHub…");
+
 
     /* ---- GitHub automatic update ---- */
     const ghInfo = view.querySelector("#ghInfo");

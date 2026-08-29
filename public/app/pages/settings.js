@@ -1,6 +1,7 @@
 import { state } from "/app/admin.js";
 import { TIMEZONES, setTimezone } from "/app/api.js";
 import { ACCENTS, getAccent, applyAccent, getTheme, applyTheme } from "/app/theme.js";
+import { KIOSK_TEMPLATES, templateCss } from "/app/kiosk-templates.js";
 
 const TEXT_FIELDS = [
   ["institution_name", "University / institution name"],
@@ -72,7 +73,27 @@ export async function renderSettings(view, { api, esc, toast }) {
           <button class="ghost" id="resetAppearance" style="width:100%;margin-top:.7rem">Reset to default</button>
         </div>
 
+        <div class="panel">
+          <h3>Kiosk template</h3>
+          <p class="muted">Pick one of the ready-made kiosk designs. Your custom CSS below is applied on top,
+            so any part of the template can still be overridden.</p>
+          <div class="template-grid">
+            ${KIOSK_TEMPLATES.map((t) => `
+              <button type="button" class="template-option${(s.kiosk_template || "classic") === t.id ? " active" : ""}" data-template="${t.id}">
+                <span class="template-name">${esc(t.label)}</span>
+                <span class="muted template-desc">${esc(t.description)}</span>
+              </button>`).join("")}
+          </div>
+          <div class="row" style="margin-top:.7rem">
+            <button id="saveTemplate">Save template</button>
+            <button class="ghost" id="copyTemplateCss">Copy this template's CSS into the editor</button>
+          </div>
+        </div>
+
       </div>
+
+
+
 
 
 
@@ -114,6 +135,37 @@ export async function renderSettings(view, { api, esc, toast }) {
       </div>
     </div>`;
 
+
+  let template = s.kiosk_template || "classic";
+  const paintTemplates = () => {
+    for (const b of view.querySelectorAll(".template-option"))
+      b.classList.toggle("active", b.dataset.template === template);
+  };
+  const applyPreviewTemplate = () => {
+    const frame = view.querySelector("#kioskPreview");
+    const doc = frame?.contentDocument;
+    if (!doc) return;
+    const style = doc.getElementById("kioskTemplateCss");
+    if (style) style.textContent = templateCss(template);
+    doc.body.dataset.template = template;
+  };
+  for (const b of view.querySelectorAll(".template-option")) {
+    b.onclick = () => { template = b.dataset.template; paintTemplates(); applyPreviewTemplate(); };
+  }
+  view.querySelector("#saveTemplate").onclick = async () => {
+    try {
+      await api("/api/settings/kiosk", { method: "PUT", body: { kiosk_template: template } });
+      toast("Kiosk template saved");
+      reloadPreview();
+    } catch (e) { toast(e.message, true); }
+  };
+  view.querySelector("#copyTemplateCss").onclick = () => {
+    const css = templateCss(template);
+    if (!css) return toast("The Classic template uses the default styles — nothing to copy", true);
+    cssEditor.value = `${cssEditor.value.trim()}\n\n${css}`.trim();
+    applyPreviewCss();
+    toast("Template CSS copied — edit it, then press Save custom CSS");
+  };
 
   const paintAccents = () => {
     const current = getAccent();
@@ -161,13 +213,15 @@ export async function renderSettings(view, { api, esc, toast }) {
     if (style) style.textContent = normalizeCss(cssEditor.value);
   };
   cssEditor.addEventListener("input", applyPreviewCss);
-  view.querySelector("#kioskPreview").addEventListener("load", applyPreviewCss);
+  view.querySelector("#kioskPreview").addEventListener("load", () => { applyPreviewTemplate(); applyPreviewCss(); });
+  paintTemplates();
 
   view.querySelector("#save").onclick = async () => {
     const body = { result_seconds: Number(view.querySelector("#s_result_seconds").value) || 7 };
     for (const [k] of TEXT_FIELDS) body[k] = view.querySelector(`#s_${k}`).value;
     for (const [k] of TOGGLES) body[k] = view.querySelector(`#s_${k}`).checked;
     body.theme = view.querySelector("#s_theme").value;
+    body.kiosk_template = template;
     body.timezone = view.querySelector("#s_timezone").value;
     body.custom_css = cssEditor.value;
     try {

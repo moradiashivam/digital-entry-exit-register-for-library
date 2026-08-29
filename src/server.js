@@ -18,6 +18,7 @@ import sip2Routes from "./routes/sip2.routes.js";
 import backupRoutes from "./routes/backup.routes.js";
 import updateRoutes from "./routes/update.routes.js";
 import { startScheduler } from "./jobs.js";
+import { renderPublicPage, getSeoSettings, robotsTxt, sitemapXml, baseUrl } from "./seo.js";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,7 +51,32 @@ app.use("/api/backup", backupRoutes);
 app.use("/api/update", updateRoutes);
 
 
-app.use(express.static(path.join(__dirname, "..", "public")));
+/* ---- Public marketing pages: SEO tags injected server-side ---- */
+const publicDir = path.join(__dirname, "..", "public");
+const seoPage = (routes, page, file) =>
+  app.get(routes, async (req, res, next) => {
+    try {
+      res.type("html").set("Cache-Control", "no-cache").send(
+        await renderPublicPage(path.join(publicDir, file), page, req),
+      );
+    } catch (e) { next(e); }
+  });
+
+seoPage(["/", "/index.html"], "home", "index.html");
+seoPage(["/contact", "/contact.html"], "contact", "contact.html");
+seoPage("/docs.html", "docs", "docs.html");
+seoPage("/developer.html", "developer", "developer.html");
+
+app.get("/robots.txt", async (req, res) => {
+  const s = await getSeoSettings().catch(() => ({}));
+  res.type("text/plain").send(robotsTxt(s, baseUrl(s, req)));
+});
+app.get("/sitemap.xml", async (req, res) => {
+  const s = await getSeoSettings().catch(() => ({}));
+  res.type("application/xml").send(sitemapXml(s, baseUrl(s, req)));
+});
+
+app.use(express.static(publicDir));
 app.get("/kiosk/:slug", (_req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.sendFile(path.join(__dirname, "..", "public", "kiosk.html"));

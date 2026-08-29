@@ -2,6 +2,32 @@ import { q } from "./db.js";
 import { sendMail, smtpConfigured } from "./mailer.js";
 import { runGithubCheckJob } from "./github-update.js";
 
+const RETRY_MS = 30 * 1000;
+
+const connectionProblem = (error) => {
+  const code = String(error?.code || error?.cause?.code || "");
+  return ["ETIMEDOUT", "ECONNREFUSED", "ECONNRESET", "PROTOCOL_CONNECTION_LOST"].includes(code);
+};
+
+let databaseWarningShown = false;
+
+/** Do not start database-backed jobs until MySQL is reachable. */
+async function whenDatabaseReady(job) {
+  try {
+    await q("SELECT 1");
+    if (databaseWarningShown) console.log("  scheduler: MySQL connection restored");
+    databaseWarningShown = false;
+    return await job();
+  } catch (error) {
+    if (!connectionProblem(error)) throw error;
+    if (!databaseWarningShown) {
+      console.warn("  scheduler: waiting for MySQL; background jobs will retry automatically");
+      databaseWarningShown = true;
+    }
+    return null;
+  }
+}
+
 const setting = async (key, fallback) => {
   const rows = await q("SELECT setting_value FROM platform_settings WHERE setting_key = ?", [key]);
   return rows[0]?.setting_value ?? fallback;
@@ -136,27 +162,38 @@ export async function runAutoExitJob() {
 /** Runs once at boot and then every 24 hours. */
 export function startScheduler() {
   const tick = () =>
-    runExpiryJob()
-      .then((r) => console.log("  expiry job:", JSON.stringify(r)))
+    whenDatabaseReady(runExpiryJob)
+      .then((r) => r && console.log("  expiry job:", JSON.stringify(r)))
       .catch((e) => console.error("  expiry job failed:", e.message));
   setTimeout(tick, 5000);
   setInterval(tick, 24 * 60 * 60 * 1000).unref?.();
 
   const autoExit = () =>
-    runAutoExitJob()
-      .then((r) => r.closed && console.log(`  auto-exit: closed ${r.closed} visit(s)`))
+    whenDatabaseReady(runAutoExitJob)
+      .then((r) => r?.closed && console.log(`  auto-exit: closed ${r.closed} visit(s)`))
       .catch((e) => console.error("  auto-exit job failed:", e.message));
   setTimeout(autoExit, 8000);
   setInterval(autoExit, 5 * 60 * 1000).unref?.();
 
   // Daily GitHub release check (the helper itself only calls GitHub once a day).
   const releaseCheck = () =>
-    runGithubCheckJob()
+    whenDatabaseReady(runGithubCheckJob)
       .then((r) => {
+        if (!r) return;
         if (r.error) console.error("  update check failed:", r.error);
         else if (r.available) console.log(`  update available on GitHub: ${r.latest}`);
       })
       .catch((e) => console.error("  update check failed:", e.message));
   setTimeout(releaseCheck, 12000);
   setInterval(releaseCheck, 60 * 60 * 1000).unref?.();
+
+  // If MySQL is still starting (common with XAMPP/WAMP), retry promptly rather
+  // than waiting for the normal five-minute/hourly schedules.
+  const readinessRetry = setInterval(() => {
+    if (!databaseWarningShown) return;
+    whenDatabaseReady(async () => {
+      await Promise.allSettled([runAutoExitJob(), runGithubCheckJob()]);
+    }).catch((e) => console.error("  scheduler retry failed:", e.message));
+  }, RETRY_MS);
+  readinessRetry.unref?.();
 }

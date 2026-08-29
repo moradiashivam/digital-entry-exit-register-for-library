@@ -4,6 +4,7 @@ import { requireAuth, requireOwner, logAudit } from "../auth.js";
 import { encrypt } from "../crypto.js";
 import { sendMailWith } from "../mailer.js";
 import { runExpiryJob } from "../jobs.js";
+import { SEO_KEYS, SEO_PAGES, getSeoSettings, baseUrl, robotsTxt, sitemapXml, seoAudit, pageMeta } from "../seo.js";
 
 const router = Router();
 router.use(requireAuth, requireOwner);
@@ -477,6 +478,24 @@ router.post("/leads/:id/convert", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ *
+ * 5b. SEO — search engine visibility for the public marketing site.   *
+ * ------------------------------------------------------------------ */
+router.get("/seo", async (req, res) => {
+  const settings = await getSeoSettings();
+  const base = baseUrl(settings, req);
+  res.json({
+    settings,
+    base,
+    pages: Object.entries(SEO_PAGES).map(([key, p]) => ({
+      key, label: p.label, path: p.path, url: base + p.path, ...pageMeta(key, settings),
+    })),
+    robots: robotsTxt(settings, base),
+    sitemap: sitemapXml(settings, base),
+    audit: seoAudit(settings, base),
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * 6. Platform settings, SMTP and the expiry job                       *
  * ------------------------------------------------------------------ */
 router.get("/settings", async (_req, res) => {
@@ -493,7 +512,7 @@ router.put("/settings", async (req, res) => {
   const allowed = ["grace_days", "company_name", "company_address", "gst_number", "currency", "invoice_footer",
     "platform_name", "site_brand", "site_tagline", "site_contact_email", "site_contact_phone",
     "site_contact_address", "site_custom_enabled", "site_home_html", "site_home_css",
-    "site_contact_html", "site_contact_css"];
+    "site_contact_html", "site_contact_css", ...SEO_KEYS];
   for (const key of allowed) {
     if (req.body?.[key] === undefined) continue;
     await q(

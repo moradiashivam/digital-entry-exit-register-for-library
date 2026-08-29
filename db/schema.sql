@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS kiosk_settings (
   timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Kolkata',
   theme ENUM('dark','light') NOT NULL DEFAULT 'light',
   custom_css TEXT NULL,
+  kiosk_template VARCHAR(40) NOT NULL DEFAULT 'classic',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_kiosk_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

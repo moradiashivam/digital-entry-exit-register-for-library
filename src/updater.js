@@ -17,6 +17,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { pool, q, one, uuid, localDateTime } from "./db.js";
+import { isNewer, storedVersion, recordInstalledVersion } from "./version.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -242,15 +243,29 @@ async function runMigrations(migrations, updateId, log) {
  * The upgrade itself
  * ------------------------------------------------------------------ */
 
-/** Version of the code currently running. */
+/**
+ * Version of the code currently running.
+ * package.json is the source of truth, but when an upgrade recorded a newer
+ * version (GitHub release tag or uploaded package) that one wins — the running
+ * files may still be the ones the process started with.
+ */
 export async function currentVersion() {
+  let pkgVersion = "unknown";
   try {
     const pkg = JSON.parse(await fsp.readFile(path.join(APP_ROOT, "package.json"), "utf8"));
-    return String(pkg.version || "unknown");
+    pkgVersion = String(pkg.version || "unknown");
   } catch {
-    return "unknown";
+    /* package.json unreadable */
   }
+  try {
+    const stored = await storedVersion();
+    if (stored && (pkgVersion === "unknown" || isNewer(stored, pkgVersion))) return stored;
+  } catch {
+    /* platform_settings not ready */
+  }
+  return pkgVersion;
 }
+
 
 /**
  * Install an uploaded package.
@@ -316,9 +331,11 @@ export async function installPackage({ buffer, filename, adminEmail }) {
       [localDateTime(), applied.length, appBackup, dbBackup, JSON.stringify(steps), updateId],
     );
     log("Upgrade completed. Restart the application to run the new version.", "success");
+    await recordInstalledVersion(pkg.version).catch(() => {});
     await q("UPDATE app_updates SET log = ? WHERE id = ?", [JSON.stringify(steps), updateId]);
 
     return { ok: true, id: updateId, version: pkg.version, from, migrations: applied, steps };
+
   } catch (e) {
     log(e.message, "error");
     let rolledBack = false;
