@@ -17,6 +17,7 @@ const TOGGLES = [
   ["allow_rfid", "Allow RFID card"],
   ["allow_manual", "Allow manual code entry"],
   ["allow_barcode", "Allow camera barcode scan"],
+  ["allow_face", "Allow face recognition (enrol faces on the Face ID page)"],
   ["show_photo", "Show student photo"],
   ["show_clock", "Show clock"],
   ["multi_kiosk_transfer", "Automatic transfer between kiosks (a visit opened at one kiosk closes there and re-opens here)"],

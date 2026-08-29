@@ -67,6 +67,22 @@ const run = async () => {
     console.log("\u2714 members.designation added");
   }
 
+  // Facial recognition at the kiosk — added in a later version.
+  for (const [col, ddl] of [
+    ["allow_face", "ADD COLUMN allow_face TINYINT(1) NOT NULL DEFAULT 0 AFTER allow_barcode"],
+    ["face_threshold", "ADD COLUMN face_threshold DECIMAL(4,2) NOT NULL DEFAULT 0.55"],
+    ["face_model_url", "ADD COLUMN face_model_url VARCHAR(255) NOT NULL DEFAULT ''"],
+  ]) {
+    const [has] = await conn.query(
+      "SELECT 1 FROM information_schema.columns WHERE table_schema = ? AND table_name = 'kiosk_settings' AND column_name = ?",
+      [dbName, col],
+    );
+    if (!has.length) {
+      await conn.query(`ALTER TABLE kiosk_settings ${ddl}`);
+      console.log(`\u2714 kiosk_settings.${col} added`);
+    }
+  }
+
   // Index that keeps the report aggregates fast as the log table grows.
   const [logIdx] = await conn.query(
     "SELECT 1 FROM information_schema.statistics WHERE table_schema = ? AND table_name = 'entry_exit_logs' AND index_name = 'idx_log_action_time'",

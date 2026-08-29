@@ -54,6 +54,7 @@ function paintTabs() {
     ["RFID", settings.allow_rfid, "RFID card"],
     ["Manual", settings.allow_manual, "Manual code"],
     ["Barcode", settings.allow_barcode, "Camera barcode"],
+    ["Face", settings.allow_face, "Face scan"],
   ].filter(([, on]) => on);
   method = options.some(([m]) => m === method) ? method : options[0]?.[0] ?? "Manual";
   el("tabs").innerHTML = options
@@ -62,12 +63,17 @@ function paintTabs() {
   el("code").placeholder =
     method === "RFID" ? "Tap the RFID card…" :
     method === "Palm" ? "Waiting for the palm scanner…" :
-    method === "Barcode" ? "Or type the member code" : "Type the member code";
+    method === "Barcode" ? "Or type the member code" :
+    method === "Face" ? "Or type the member code" : "Type the member code";
   const cam = el("camera");
+  const usesCamera = method === "Barcode" || method === "Face";
   if (cam) {
-    cam.hidden = method !== "Barcode";
-    if (method !== "Barcode") stopCamera();
+    cam.hidden = !usesCamera;
+    if (!usesCamera) stopCamera();
   }
+  camHint(method === "Face"
+    ? "Look straight at the camera — your face is matched with your library photo."
+    : "Hold the ID card barcode inside the frame.");
 }
 
 /* ---------- camera barcode scanning ---------- */
@@ -81,6 +87,7 @@ function camHint(text) { const h = el("cameraHint"); if (h) h.textContent = text
 
 function stopCamera() {
   scanning = false;
+  faceRunning = false;
   try { zxingReader?.reset?.(); } catch {}
   zxingReader = null;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
@@ -120,6 +127,11 @@ async function startCamera() {
   scanning = true;
   el("camStart").hidden = true;
   el("camStop").hidden = false;
+  if (method === "Face") {
+    camHint("Look at the camera…");
+    startFaceLoop(video);
+    return;
+  }
   camHint("Hold the ID card barcode inside the frame.");
 
   if ("BarcodeDetector" in window) {
@@ -149,6 +161,65 @@ async function startCamera() {
   } catch {
     camHint("This browser cannot read barcodes. Use Chrome or Edge, or type the member code.");
   }
+}
+
+/* ---------- facial recognition ----------
+   Descriptors are matched in the browser (face-api.js). The kiosk only sends
+   the matched member id to the register, never any face image. */
+let faceRunning = false;
+let faceData = null;
+let lastFaceMember = "";
+let lastFaceAt = 0;
+
+async function loadFaceData() {
+  if (faceData) return faceData;
+  const res = await fetch(`/api/public/kiosk/${encodeURIComponent(slug)}/faces`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Face recognition is not switched on for this library");
+  faceData = await res.json();
+  return faceData;
+}
+
+async function startFaceLoop(video) {
+  if (faceRunning) return;
+  faceRunning = true;
+  let fr;
+  try {
+    fr = await import("/app/face-engine.js");
+    const data = await loadFaceData();
+    if (!data.faces.length) {
+      camHint("No faces are enrolled yet. Ask the library desk to enrol photos first.");
+      faceRunning = false;
+      return;
+    }
+    camHint("Loading the face model…");
+    await fr.loadModels(data.model_url);
+    camHint("Look straight at the camera.");
+  } catch (e) {
+    camHint(e.message || "Face recognition could not start.");
+    faceRunning = false;
+    return;
+  }
+
+  const loop = async () => {
+    if (!faceRunning || !scanning) return;
+    try {
+      const found = await fr.describeFace(video, faceData.model_url);
+      if (found) {
+        const match = fr.bestMatch(found.descriptor, faceData.faces, faceData.threshold || 0.55);
+        const now = Date.now();
+        if (!match) {
+          camHint("Face not recognised — try again or use your member code.");
+        } else if (match.member_id !== lastFaceMember || now - lastFaceAt > 6000) {
+          lastFaceMember = match.member_id;
+          lastFaceAt = now;
+          camHint(`Face matched (${match.confidence}%)`);
+          submitScan(match.member_id, "Face", match.confidence);
+        }
+      }
+    } catch {}
+    setTimeout(() => requestAnimationFrame(loop), 500);
+  };
+  requestAnimationFrame(loop);
 }
 
 async function boot() {
@@ -200,15 +271,16 @@ async function boot() {
     return;
   }
   paintTabs();
-  if (method === "Barcode") startCamera(); else el("code").focus();
+  if (method === "Barcode" || method === "Face") startCamera(); else el("code").focus();
 }
 
 el("tabs").addEventListener("click", (e) => {
   const m = e.target.dataset.method;
   if (!m) return;
   method = m;
+  stopCamera();
   paintTabs();
-  el("code").focus();
+  if (method === "Barcode" || method === "Face") startCamera(); else el("code").focus();
 });
 
 el("scanForm").addEventListener("submit", (e) => {
@@ -265,11 +337,14 @@ document.addEventListener("keydown", (e) => {
 });
 
 
-async function submitScan(value, methodUsed) {
+async function submitScan(value, methodUsed, confidence) {
   clearTimeout(resetTimer);
   const method = methodUsed;
   const body = { institute: slug, method, device_id: deviceId };
-  if (method === "RFID") body.rfid_uid = value; else body.member_code = value;
+  if (confidence != null) body.confidence = confidence;
+  if (method === "RFID") body.rfid_uid = value;
+  else if (method === "Face") body.member_id = value;
+  else body.member_code = value;
 
   try {
     const res = await fetch("/api/public/scan-event", {
@@ -303,7 +378,7 @@ async function submitScan(value, methodUsed) {
   }
 
   resetTimer = setTimeout(() => { el("result").innerHTML = ""; }, (settings.result_seconds || 7) * 1000);
-  if (method !== "Barcode") el("code").focus();
+  if (method !== "Barcode" && method !== "Face") el("code").focus();
 }
 
 el("camStart").addEventListener("click", startCamera);

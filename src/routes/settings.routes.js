@@ -11,9 +11,9 @@ router.use(requireAuth);
 
 const FIELDS = [
   "institution_name", "kiosk_title", "logo_url", "welcome_message", "entry_label", "exit_label",
-  "footer_note", "theme", "kiosk_template", "custom_css", "allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "result_seconds", "timezone", "multi_kiosk_transfer",
+  "footer_note", "theme", "kiosk_template", "custom_css", "allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "result_seconds", "timezone", "multi_kiosk_transfer", "allow_face", "face_threshold", "face_model_url",
 ];
-const BOOLS = new Set(["allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "multi_kiosk_transfer"]);
+const BOOLS = new Set(["allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "multi_kiosk_transfer", "allow_face"]);
 
 router.get("/kiosk", withInstitute(isMember), async (req, res) => {
   let row = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [req.institute.id]);

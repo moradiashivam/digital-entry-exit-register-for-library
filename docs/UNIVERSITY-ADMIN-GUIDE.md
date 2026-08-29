@@ -156,3 +156,26 @@ A member may only have one open visit at a time (complete-transaction principle)
 ### Transaction history
 Reports → **Transaction history (multi-kiosk)** lists every scan of a member with
 its kiosk, library, location and method, so transfers are fully traceable.
+
+## Face ID (facial recognition)
+
+Members can enter and exit simply by looking at the kiosk camera — no card, no code.
+
+1. **Add photos** — upload a clear, front-facing photo on the Members page
+   (or bulk import photos into `public/photos/<university>/<member code>.jpg`).
+2. **Face ID page** — open *Face ID* in the sidebar, tick **Allow face scan at the kiosk**
+   and press **Enrol all photos**. Each photo is converted into a 128-number face
+   descriptor in your browser; the photo itself never leaves the page.
+   Members without a usable photo can be enrolled live with **Live webcam enrolment**.
+3. **Match strictness** — 0.55 suits most libraries. Lower it if two similar-looking
+   people are ever mixed up; raise it slightly if genuine members are rejected often.
+4. **At the kiosk** — the *Face scan* tab appears automatically. The camera matches the
+   person in front of it against the enrolled faces and records the Entry or Exit,
+   showing the student photo and name just like a card scan.
+
+Notes:
+- The face model files are downloaded once from the internet and then cached by the
+  browser. For a fully offline kiosk, host the model folder yourself and set
+  `face_model_url` in the kiosk settings to that address.
+- Only the descriptor (a list of numbers) is stored in the database — no face images.
+- Faces are removed automatically when a member is deleted.

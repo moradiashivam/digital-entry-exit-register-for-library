@@ -198,6 +198,9 @@ CREATE TABLE IF NOT EXISTS kiosk_settings (
   theme ENUM('dark','light') NOT NULL DEFAULT 'light',
   custom_css TEXT NULL,
   kiosk_template VARCHAR(40) NOT NULL DEFAULT 'classic',
+  allow_face TINYINT(1) NOT NULL DEFAULT 0,
+  face_threshold DECIMAL(4,2) NOT NULL DEFAULT 0.55,
+  face_model_url VARCHAR(255) NOT NULL DEFAULT '',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_kiosk_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -218,6 +221,21 @@ CREATE TABLE IF NOT EXISTS kiosk_devices (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+
+-- Facial recognition: one 128-number descriptor per member (face-api.js / dlib).
+CREATE TABLE IF NOT EXISTS face_templates (
+  id CHAR(36) NOT NULL PRIMARY KEY,
+  institute_id CHAR(36) NOT NULL,
+  member_id CHAR(36) NOT NULL,
+  descriptor TEXT NOT NULL,
+  source ENUM('photo','camera') NOT NULL DEFAULT 'photo',
+  quality DECIMAL(5,3) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_face_member (member_id),
+  KEY idx_face_inst (institute_id),
+  CONSTRAINT fk_face_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_face_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS library_hours (
   institute_id CHAR(36) NOT NULL,

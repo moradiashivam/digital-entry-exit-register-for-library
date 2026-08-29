@@ -1,6 +1,7 @@
 import { api, clearToken, getInstitute, setInstitute, toast, esc, fmtDate, downloadCsv, setTimezone, setServerTimezone } from "/app/api.js";
 import { renderDashboard } from "/app/pages/dashboard.js";
 import { renderMembers } from "/app/pages/members.js";
+import { renderFace } from "/app/pages/face.js";
 import { renderImport } from "/app/pages/import.js";
 import { renderReports } from "/app/pages/reports.js";
 import { renderSettings } from "/app/pages/settings.js";
@@ -45,6 +46,7 @@ const TENANT_PAGES = {
   dashboard: { title: "Dashboard", subtitle: "Live occupancy and today's footfall", render: renderDashboard },
   members: { title: "Members", subtitle: "Students and staff registered for library access", render: renderMembers },
   masters: { title: "Master data", subtitle: "Courses, departments and academic years", render: renderMasters },
+  face: { title: "Face ID", subtitle: "Enrol member faces for kiosk facial recognition", render: renderFace },
   import: { title: "Bulk import", subtitle: "Upload members from an Excel or CSV file", render: renderImport },
   reports: { title: "Reports", subtitle: "Visit, student, course, footfall, absentee and location reports with export", render: renderReports },
   audit: { title: "Audit trail", subtitle: "Every administrative action, append-only", render: renderAudit },
@@ -74,6 +76,7 @@ const PAGE_MODULE = {
   members: "members",
   masters: "master_data",
   import: "members",
+  face: "members",
   reports: "reports",
   audit: "audit",
   settings: "kiosks",

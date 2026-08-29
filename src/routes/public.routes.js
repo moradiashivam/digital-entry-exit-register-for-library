@@ -55,7 +55,7 @@ async function recordFailure(instituteId, deviceId, code, reason, method) {
 router.post("/scan-event", async (req, res) => {
   const body = req.body || {};
   const slug = String(body.institute || "").trim();
-  let method = ["Palm", "RFID", "Manual", "Barcode"].includes(body.method) ? body.method : "Palm";
+  let method = ["Palm", "RFID", "Manual", "Barcode", "Face"].includes(body.method) ? body.method : "Palm";
   const deviceId = String(body.device_id || "kiosk-1");
 
   const inst = await one("SELECT * FROM institutes WHERE slug = ?", [slug]);
@@ -248,6 +248,33 @@ router.post("/scan-event", async (req, res) => {
       photo_url: member.photo_url,
     },
     occurred_at: recordedAt,
+  });
+});
+
+/**
+ * Enrolled face descriptors for one kiosk link.
+ * Only descriptors + member ids are exposed (no names, codes or photos), and
+ * only while the university's kiosk is actually enabled.
+ */
+router.get("/kiosk/:slug/faces", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const inst = await one("SELECT * FROM institutes WHERE slug = ?", [req.params.slug]);
+  if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
+  const settings = await one("SELECT allow_face, face_threshold, face_model_url FROM kiosk_settings WHERE institute_id = ?", [inst.id]);
+  if (!settings || Number(settings.allow_face) !== 1) return res.status(403).json({ error: "Face recognition is switched off" });
+  if (!kioskEnabled(inst)) return res.status(403).json({ error: "Kiosk disabled" });
+  const rows = await q(
+    `SELECT f.member_id, f.descriptor FROM face_templates f
+     JOIN members m ON m.id = f.member_id
+     WHERE f.institute_id = ? AND m.status = 'Active'`,
+    [inst.id],
+  );
+  res.json({
+    threshold: Number(settings.face_threshold) || 0.55,
+    model_url: settings.face_model_url || "",
+    faces: rows.map((r) => {
+      try { return { member_id: r.member_id, descriptor: JSON.parse(r.descriptor) }; } catch { return null; }
+    }).filter((f) => Array.isArray(f?.descriptor) && f.descriptor.length === 128),
   });
 });
 
