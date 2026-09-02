@@ -308,6 +308,68 @@ async function startIdleDisplay() {
   noteActivity();
 }
 
+/* ---------- admin-approved device gate ---------- */
+let devicePoll = null;
+
+function showDeviceScreen(state) {
+  const form = el("scanForm");
+  if (form) { form.hidden = true; form.style.display = "none"; }
+  const cam = el("camera");
+  if (cam) cam.hidden = true;
+  const tabs = el("tabs");
+  if (tabs) tabs.innerHTML = "";
+  const heading = state.status === "pending" ? "Waiting for approval"
+    : state.status === "expired" ? "Kiosk approval expired"
+    : state.status === "revoked" ? "Kiosk access revoked" : "Device not approved";
+  const codeLine = state.code
+    ? `<p class="badge">Device code: ${esc(state.code)}</p>` : "";
+  el("result").innerHTML = `<div class="result bad"><h2>${esc(heading)}</h2>
+    <p>${esc(state.message || "Ask the library administrator to approve this computer.")}</p>
+    ${codeLine}
+    <p class="muted">Admin panel → Master Setting → Kiosk device approvals.</p></div>`;
+}
+
+async function deviceState(register) {
+  const res = await fetch(
+    `/api/public/kiosk/${encodeURIComponent(slug)}/device?device=${encodeURIComponent(deviceId)}`,
+    { method: register ? "POST" : "GET", cache: "no-store", credentials: "same-origin",
+      headers: register ? { "Content-Type": "application/json" } : undefined,
+      body: register ? JSON.stringify({ device_id: deviceId }) : undefined },
+  );
+  return res.json();
+}
+
+/** Resolves true when this computer may scan. Keeps polling while pending. */
+async function ensureDeviceApproved() {
+  let state;
+  try {
+    state = await deviceState(true);
+  } catch {
+    showDeviceScreen({ status: "unknown", message: "Cannot reach the register server." });
+    return false;
+  }
+  if (state.status === "approved") return true;
+  showDeviceScreen(state);
+  clearInterval(devicePoll);
+  devicePoll = setInterval(async () => {
+    try {
+      const next = await deviceState(false);
+      if (next.status === "approved") {
+        clearInterval(devicePoll);
+        el("result").innerHTML = "";
+        paintTabs();
+        const f = el("scanForm");
+        f.hidden = false;
+        f.style.display = "";
+        if (method === "Barcode" || method === "Face") startCamera(); else el("code").focus();
+      } else {
+        showDeviceScreen(next);
+      }
+    } catch { /* keep waiting */ }
+  }, 8000);
+  return false;
+}
+
 async function boot() {
   const res = await fetch(
     `/api/public/kiosk/${encodeURIComponent(slug)}?device=${encodeURIComponent(deviceId)}`,
@@ -356,6 +418,7 @@ async function boot() {
     el("scanForm").hidden = true;
     return;
   }
+  if (!(await ensureDeviceApproved())) return;
   paintTabs();
   if (method === "Barcode" || method === "Face") startCamera(); else el("code").focus();
   startIdleDisplay();
@@ -464,6 +527,7 @@ async function submitScan(value, methodUsed, confidence) {
   try {
     const res = await fetch("/api/public/scan-event", {
       method: "POST",
+      credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -478,6 +542,10 @@ async function submitScan(value, methodUsed, confidence) {
         <p class="muted">${new Date(out.occurred_at).toLocaleString("en-GB")}</p>
         ${insightsHtml(out)}</div>`;
 
+    } else if (out.reason === "device_not_approved") {
+      showDeviceScreen(out);
+      ensureDeviceApproved();
+      return;
     } else if (out.reason === "membership_expired") {
       const who = out.member_name
         ? `<p>${esc(out.member_name)}${out.member_code ? ` · ${esc(out.member_code)}` : ""}</p>` : "";

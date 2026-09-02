@@ -2,7 +2,7 @@
  * Master Setting — sublibraries, sublibrary users and their permissions.
  * Only the University Administrator of the active university can open this page.
  */
-import { kiosksPanel, hoursPanel, staffPanel, backupPanel, sip2Panel, pdfBrandingPanel } from "/app/pages/admin-sections.js";
+import { kiosksPanel, kioskApprovalsPanel, hoursPanel, staffPanel, backupPanel, sip2Panel, pdfBrandingPanel } from "/app/pages/admin-sections.js";
 
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -179,6 +179,7 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
       </div>
 
       <div id="ms_kiosks" style="margin-top:1rem"></div>
+      <div id="ms_kiosk_approvals" style="margin-top:1rem"></div>
       <div id="ms_hours" style="margin-top:1rem"></div>
       <div id="ms_pdf" style="margin-top:1rem"></div>
       <div id="ms_sip2" style="margin-top:1rem"></div>
@@ -189,6 +190,7 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
 
     const ctx = { api, esc, toast };
     kiosksPanel(view.querySelector("#ms_kiosks"), ctx);
+    kioskApprovalsPanel(view.querySelector("#ms_kiosk_approvals"), ctx);
     hoursPanel(view.querySelector("#ms_hours"), ctx);
     pdfBrandingPanel(view.querySelector("#ms_pdf"), ctx);
     sip2Panel(view.querySelector("#ms_sip2"), ctx);

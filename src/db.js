@@ -74,7 +74,7 @@ export async function ensureSchemaExtras() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
 
   // Platform (owner) tables + Master Setting (sublibrary access) tables.
-  for (const file of ["platform.sql", "access.sql", "display.sql"]) {
+  for (const file of ["platform.sql", "access.sql", "display.sql", "kiosk-sessions.sql"]) {
     const sql = await readFile(path.join(dir, "..", "db", file), "utf8");
     for (const stmt of sql.split(/;\s*\n/)) {
       // Drop comment lines so a leading comment block never hides the statement.

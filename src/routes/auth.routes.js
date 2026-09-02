@@ -1,4 +1,5 @@
 import { Router } from "express";
+import svgCaptcha from "svg-captcha";
 import { q, one, uuid } from "../db.js";
 import {
   hashPassword,
@@ -22,14 +23,50 @@ function rateLimit(key, max, windowMs) {
   return list.length <= max;
 }
 
+/** In-memory captcha store: id -> { answer, expires }. One-time use. */
+const captchas = new Map();
+const CAPTCHA_TTL = 5 * 60 * 1000;
+function sweepCaptchas() {
+  const now = Date.now();
+  for (const [id, c] of captchas) if (now > c.expires) captchas.delete(id);
+}
+
+/** GET /api/auth/captcha — returns { id, svg } for the login form. */
+router.get("/captcha", (_req, res) => {
+  sweepCaptchas();
+  const captcha = svgCaptcha.create({
+    size: 4,
+    ignoreChars: "0o1ilI",
+    noise: 2,
+    color: true,
+    width: 180,
+    height: 60,
+    fontSize: 52,
+  });
+  const id = uuid();
+  captchas.set(id, { answer: captcha.text.toLowerCase(), expires: Date.now() + CAPTCHA_TTL });
+  res.set("Cache-Control", "no-store").json({ id, svg: captcha.data });
+});
+
+function checkCaptcha(id, text) {
+  const c = captchas.get(String(id || ""));
+  captchas.delete(String(id || "")); // one-time use, even on failure
+  if (!c || Date.now() > c.expires) return false;
+  return c.answer === String(text || "").trim().toLowerCase();
+}
+
 
 router.post("/login", async (req, res) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
   if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+  if (!checkCaptcha(req.body?.captchaId, req.body?.captchaText)) {
+    return res.status(400).json({ error: "Incorrect or expired security code — try again", captcha: true });
+  }
   if (!rateLimit(`login:${req.ip}:${email}`, 10, 5 * 60 * 1000)) {
     return res.status(429).json({ error: "Too many attempts — try again in a few minutes" });
   }
+
 
 
   const user = await one("SELECT * FROM users WHERE email = ?", [email]);

@@ -18,6 +18,11 @@
         <input id="email" type="email" autocomplete="username" required style="width:100%" />
         <label for="password">Password</label>
         <input id="password" type="password" autocomplete="current-password" required style="width:100%" />
+        <label for="captcha">Security code</label>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <div id="captcha-img" title="Click to refresh" style="cursor:pointer;border:1px solid var(--border,#d1d5db);border-radius:8px;overflow:hidden;line-height:0;background:#fff;min-width:180px;min-height:60px"></div>
+          <input id="captcha" type="text" autocomplete="off" required placeholder="Code" style="flex:1" maxlength="8" />
+        </div>
         <button type="submit" style="width:100%;margin-top:1rem" id="submit">Sign in</button>
         <p id="error" class="muted" style="color:var(--danger)"></p>
         <p class="muted" style="margin-top:.4rem"><a href="/forgot.html">Forgot your password?</a></p>
@@ -33,6 +38,22 @@
 
     const form = document.getElementById("form");
     const error = document.getElementById("error");
+    const captchaImg = document.getElementById("captcha-img");
+    const captchaInput = document.getElementById("captcha");
+    let captchaId = null;
+
+    async function loadCaptcha() {
+      captchaInput.value = "";
+      try {
+        const c = await api("/api/auth/captcha");
+        captchaId = c.id;
+        captchaImg.innerHTML = c.svg;
+      } catch {
+        captchaImg.textContent = "Captcha unavailable";
+      }
+    }
+    captchaImg.addEventListener("click", loadCaptcha);
+    loadCaptcha();
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -44,12 +65,15 @@
           body: {
             email: document.getElementById("email").value,
             password: document.getElementById("password").value,
+            captchaId,
+            captchaText: captchaInput.value,
           },
         });
         setToken(out.token);
         location.href = "/admin";
       } catch (err) {
         error.textContent = err.message;
+        loadCaptcha(); // captcha is one-time use — always refresh after a failure
       } finally {
         document.getElementById("submit").disabled = false;
       }

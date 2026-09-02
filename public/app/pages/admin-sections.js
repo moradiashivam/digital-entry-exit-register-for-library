@@ -723,3 +723,118 @@ export function pdfBrandingPanel(box, { api, esc, toast }) {
     .then((r) => { cfg = r || {}; paint(); })
     .catch(() => { box.textContent = "Could not load PDF header & footer settings."; });
 }
+
+/* ---------------- Kiosk device approvals ---------------- */
+
+/**
+ * Every computer that opened the kiosk link. A device can scan only after it is
+ * approved here; approval lasts 45 days by default and can be extended or
+ * revoked any time. Sublibrary admins see only their own kiosks; the university
+ * administrator sees and overrides every sublibrary.
+ */
+export function kioskApprovalsPanel(box, { api, esc, toast }) {
+  box.innerHTML = `
+    <div class="panel">
+      <h3>Kiosk device approvals</h3>
+      <p class="muted">Opening the kiosk link on a new computer creates an approval request — it cannot
+        record any entry until you approve it here. Approved devices keep a cookie for the chosen number
+        of days; extend the validity before it expires so no re-approval is needed.</p>
+      <div class="row" style="align-items:center;gap:.5rem;flex-wrap:wrap">
+        <label class="muted">Validity (days)</label>
+        <input id="kaDays" type="number" min="1" max="365" value="45" style="width:6rem" />
+        <button class="ghost" id="kaReload">Refresh</button>
+        <button class="ghost" id="kaLog">Approval history</button>
+      </div>
+      <div id="kaBox" class="muted" style="margin-top:.7rem">Loading…</div>
+      <div id="kaEvents" style="margin-top:.7rem" hidden></div>
+    </div>`;
+
+  const listBox = box.querySelector("#kaBox");
+  const eventsBox = box.querySelector("#kaEvents");
+  const daysInput = box.querySelector("#kaDays");
+  const left = (row) => {
+    if (row.status !== "approved" || !row.expires_at) return "—";
+    const ms = new Date(String(row.expires_at).replace(" ", "T")) - new Date();
+    const d = Math.ceil(ms / 86400000);
+    return d > 0 ? `${d} day${d === 1 ? "" : "s"} left` : "expired";
+  };
+
+  const paint = (data) => {
+    const rows = data.sessions || [];
+    listBox.classList.remove("muted");
+    listBox.innerHTML = rows.length
+      ? `<div style="overflow:auto"><table>
+          <thead><tr><th>Device</th><th>Kiosk / library</th><th>Code</th><th>Status</th>
+            <th>Valid until</th><th>Approved by</th><th></th></tr></thead>
+          <tbody>${rows.map((r) => `<tr data-id="${esc(r.id)}">
+            <td>${esc(r.label || r.device_id)}<div class="muted" style="font-size:.8em">${esc(r.ip || "")} · ${esc(String(r.user_agent || "").slice(0, 48))}</div></td>
+            <td>${esc(r.kiosk_name || r.device_id)}${r.sublibrary_name ? `<div class="muted" style="font-size:.8em">${esc(r.sublibrary_name)}</div>` : ""}</td>
+            <td><code>${esc(r.code)}</code></td>
+            <td>${esc(r.status)}</td>
+            <td>${r.expires_at ? `${esc(String(r.expires_at).slice(0, 16).replace("T", " "))}<div class="muted" style="font-size:.8em">${esc(left(r))}</div>` : "—"}</td>
+            <td class="muted">${esc(r.approved_email || "—")}</td>
+            <td class="row" style="gap:.35rem">
+              ${r.status === "approved"
+                ? `<button class="ka-extend">Extend</button>`
+                : `<button class="ka-approve">Approve</button>`}
+              ${r.status === "revoked" ? "" : `<button class="ghost ka-revoke">Revoke</button>`}
+              <button class="ghost ka-del">Remove</button>
+            </td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted">No kiosk device has requested access yet.</p>`;
+
+    if (data.can_manage === false) {
+      listBox.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      return;
+    }
+    const act = (id, path, body) => api(`/api/kiosk-devices/${id}/${path}`, { method: "POST", body });
+    for (const tr of listBox.querySelectorAll("tbody tr")) {
+      const id = tr.dataset.id;
+      const days = () => Number(daysInput.value) || 45;
+      const run = async (fn, msg) => {
+        try { await fn(); toast(msg); load(); } catch (e) { toast(e.message, true); }
+      };
+      tr.querySelector(".ka-approve")?.addEventListener("click", () =>
+        run(() => act(id, "approve", { days: days() }), "Kiosk device approved"));
+      tr.querySelector(".ka-extend")?.addEventListener("click", () =>
+        run(() => act(id, "extend", { days: days() }), "Validity extended"));
+      tr.querySelector(".ka-revoke")?.addEventListener("click", () => {
+        if (!confirm("Revoke this device? It stops recording entries immediately.")) return;
+        run(() => act(id, "revoke"), "Device revoked");
+      });
+      tr.querySelector(".ka-del")?.addEventListener("click", () => {
+        if (!confirm("Remove this device record? The computer must request approval again.")) return;
+        run(() => api(`/api/kiosk-devices/${id}`, { method: "DELETE" }), "Device removed");
+      });
+    }
+  };
+
+  async function load() {
+    try {
+      const data = await api("/api/kiosk-devices");
+      if (data.default_days) daysInput.value = daysInput.value || data.default_days;
+      paint(data);
+    } catch (e) {
+      listBox.classList.add("muted");
+      listBox.textContent = e.message;
+    }
+  }
+
+  box.querySelector("#kaReload").onclick = load;
+  box.querySelector("#kaLog").onclick = async () => {
+    if (!eventsBox.hidden) { eventsBox.hidden = true; return; }
+    try {
+      const rows = await api("/api/kiosk-devices/events");
+      eventsBox.hidden = false;
+      eventsBox.innerHTML = rows.length
+        ? `<div style="overflow:auto"><table><thead><tr><th>When</th><th>Action</th><th>Device</th><th>Admin</th><th>Days</th></tr></thead>
+            <tbody>${rows.map((e) => `<tr>
+              <td>${esc(String(e.created_at).slice(0, 16).replace("T", " "))}</td>
+              <td>${esc(e.action)}</td><td>${esc(e.label || e.device_id || "—")}</td>
+              <td class="muted">${esc(e.admin_email || "kiosk")}</td><td>${esc(e.days ?? "—")}</td></tr>`).join("")}
+            </tbody></table></div>`
+        : `<p class="muted">No approval activity yet.</p>`;
+    } catch (e) { toast(e.message, true); }
+  };
+
+  load();
+}

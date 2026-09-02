@@ -4,6 +4,7 @@ import { kioskEnabled } from "../auth.js";
 import { patronInformation, maskId } from "../sip2.js";
 import { studentInsights, pickInsights, DEFAULT_CATEGORIES } from "../insights.service.js";
 import { activePostsFor } from "./display.routes.js";
+import { resolveSession, sessionState, isLive, logSessionEvent } from "../kiosk-session.js";
 
 const router = Router();
 
@@ -60,6 +61,24 @@ router.get("/kiosk/:slug/posts", async (req, res) => {
 });
 
 
+/**
+ * Device approval state of the computer opening the kiosk link.
+ * POST registers the device (creates a pending request + cookie),
+ * GET only reports the current state so the kiosk can poll while it waits.
+ */
+async function deviceStateHandler(req, res, create) {
+  res.set("Cache-Control", "no-store");
+  const inst = await one("SELECT id, name FROM institutes WHERE slug = ?", [req.params.slug]);
+  if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
+  const deviceId = String(req.query.device || req.body?.device_id || "kiosk-1").trim() || "kiosk-1";
+  const session = await resolveSession(req, res, inst, deviceId, { create });
+  res.json({ ...sessionState(session), device_id: deviceId });
+}
+
+router.get("/kiosk/:slug/device", (req, res) => deviceStateHandler(req, res, false));
+router.post("/kiosk/:slug/device", (req, res) => deviceStateHandler(req, res, true));
+
+
 async function recordFailure(instituteId, deviceId, code, reason, method) {
   await q(
     `INSERT INTO failed_scan_logs (id, institute_id, device_id, attempted_code, reason, method)
@@ -82,13 +101,25 @@ router.post("/scan-event", async (req, res) => {
   const inst = await one("SELECT * FROM institutes WHERE slug = ?", [slug]);
   if (!inst) return res.status(404).json({ status: "rejected", message: "Unknown kiosk link" });
 
-  // Browser kiosk pages on this server are trusted; anything else needs the key.
-  const sameOrigin = (req.headers.origin || "").includes(req.headers.host || "\u0000") ||
-    (req.headers.referer || "").includes(req.headers.host || "\u0000");
-  if (!sameOrigin) {
-    const secret = await one("SELECT kiosk_key FROM institute_secrets WHERE institute_id = ?", [inst.id]);
-    if (!secret || req.headers["x-kiosk-key"] !== secret.kiosk_key) {
-      return res.status(401).json({ status: "rejected", message: "Kiosk not provisioned" });
+  // Hardware bridges (C++ palm scanner etc.) authenticate with the shared key.
+  const secret = await one("SELECT kiosk_key FROM institute_secrets WHERE institute_id = ?", [inst.id]);
+  const keyOk = !!secret && req.headers["x-kiosk-key"] === secret.kiosk_key;
+
+  // Every browser device must be approved by an admin first — simply opening
+  // the kiosk URL on an unknown computer can never add a visitor entry.
+  if (!keyOk) {
+    const session = await resolveSession(req, res, inst, deviceId);
+    if (!isLive(session)) {
+      const state = sessionState(session);
+      if (session) await logSessionEvent(inst.id, session.id, "blocked", null, null, `scan blocked (${state.status})`);
+      await recordFailure(inst.id, deviceId, slug, `Kiosk device ${state.status}`, method);
+      return res.status(403).json({
+        status: "rejected",
+        reason: "device_not_approved",
+        device_status: state.status,
+        code: state.code || null,
+        message: state.message,
+      });
     }
   }
 

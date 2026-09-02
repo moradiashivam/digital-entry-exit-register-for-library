@@ -17,7 +17,8 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.11.3",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.0.5",
+    "svg-captcha": "^1.4.0"
   },
   "engines": {
     "node": ">=18"
