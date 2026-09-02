@@ -10,6 +10,7 @@ import { requireAuth, requireOwner, logAudit } from "../auth.js";
 import { installPackage, inspectPackage, currentVersion, rollbackTo, APP_ROOT, BACKUP_ROOT } from "../updater.js";
 import { getUpdateStatus, installLatestRelease } from "../github-update.js";
 import { recordInstalledVersion } from "../version.js";
+import { scanModules, updateModules } from "../npm-manager.js";
 
 const router = Router();
 router.use(requireAuth, requireOwner);
@@ -178,6 +179,36 @@ router.post("/restart", async (req, res) => {
     console.log("Restart requested from the owner console. Exiting with code 42.");
     process.exit(42);
   }, 400);
+});
+
+/* ------------------------------------------------------------------ */
+/* Node modules (npm dependencies) — security and version management    */
+/* ------------------------------------------------------------------ */
+
+/** Outdated packages and known security advisories. */
+router.get("/modules", async (_req, res) => {
+  try {
+    res.json(await scanModules());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Update node modules: audit fix, safe update, or latest for selected packages. */
+router.post("/modules/update", async (req, res) => {
+  try {
+    const mode = String(req.body?.mode || "update");
+    const packages = Array.isArray(req.body?.packages) ? req.body.packages.map(String) : [];
+    const result = await updateModules({ mode, packages });
+    await logAudit(req, null, result.ok ? "node_modules_updated" : "node_modules_update_failed", "app_updates", null, {
+      mode,
+      packages,
+      error: result.error || null,
+    }).catch(() => {});
+    res.status(result.ok ? 200 : 500).json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

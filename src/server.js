@@ -18,6 +18,7 @@ import userRoutes from "./routes/users.routes.js";
 import sip2Routes from "./routes/sip2.routes.js";
 import backupRoutes from "./routes/backup.routes.js";
 import updateRoutes from "./routes/update.routes.js";
+import displayRoutes from "./routes/display.routes.js";
 import { startScheduler } from "./jobs.js";
 import { renderPublicPage, getSeoSettings, robotsTxt, sitemapXml, baseUrl } from "./seo.js";
 
@@ -51,6 +52,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/sip2", sip2Routes);
 app.use("/api/backup", backupRoutes);
 app.use("/api/update", updateRoutes);
+app.use("/api/display", displayRoutes);
 
 
 /* ---- Public marketing pages: SEO tags injected server-side ---- */

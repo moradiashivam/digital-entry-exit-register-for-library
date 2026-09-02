@@ -277,7 +277,7 @@ body.light .accent-option:hover { background: #0000000a; }
 .master-title { display: inline-flex; align-items: center; gap: .5rem; font-weight: 600; color: var(--text); }
 .master-title svg { color: var(--brand); }
 .master-list { min-height: 46px; align-items: flex-start; flex-wrap: wrap; gap: .4rem; }
-.master-add { gap: .5rem; align-items: center; margin-top: auto; }
+.master-add { gap: .5rem; align-items: center; }
 .master-add button { min-width: 42px; font-size: 1.1rem; line-height: 1; padding: .55rem .7rem; }
 
 /* ---- Reports calendar (accent-aware, restyleable) ---- */
@@ -426,3 +426,75 @@ body.light .accent-option:hover { background: #0000000a; }
 .template-option.active { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }
 .template-name { font-weight: 600; }
 .template-desc { font-size: .78rem; line-height: 1.35; }
+
+/* “Did You Know?” student insights on the kiosk result screen. */
+.kiosk-insights { margin-top: 1rem; display: grid; gap: .5rem; text-align: left; }
+.insights-title { margin: 0; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: .8rem; opacity: .75; }
+.insight { display: flex; gap: .6rem; align-items: flex-start; padding: .65rem .8rem;
+  border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.05); }
+body.light .insight { background: rgba(0,0,0,.03); }
+.insight-icon { font-size: 1.25rem; line-height: 1.2; }
+.insight-text { font-size: 1rem; line-height: 1.35; }
+
+/* ---------- Reports: student visit analysis (Sankey) ---------- */
+.sankey-panel { margin-top: 1rem; }
+.sankey-wrap { position: relative; overflow-x: auto; margin-top: .6rem; }
+.sankey { width: 100%; min-width: 720px; display: block; }
+.sankey .sk-label { font-size: 11px; fill: currentColor; }
+.sankey .sk-col { font-size: 11px; font-weight: 700; fill: currentColor; opacity: .7; text-transform: uppercase; letter-spacing: .04em; }
+.sankey .sk-link { transition: fill-opacity .15s ease; }
+.sankey .sk-link:hover { fill-opacity: .65; }
+.sankey-tip {
+  position: absolute; z-index: 5; pointer-events: none;
+  background: rgba(17, 24, 39, .93); color: #fff; font-size: .78rem;
+  padding: .35rem .55rem; border-radius: 8px; max-width: 260px;
+}
+
+/* ---------- Library activities / kiosk display admin ---------- */
+.kd-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line, #e5e7eb);
+  padding: .55rem 0 1rem;
+  margin: 0 0 1rem;
+  box-shadow: 0 10px 18px -14px rgba(0, 0, 0, .35);
+}
+.kd-list { display: flex; flex-direction: column; gap: .6rem; margin-top: .7rem; }
+.kd-item { display: flex; gap: .7rem; align-items: flex-start; padding: .6rem; border: 1px solid var(--line, #e5e7eb); border-radius: 12px; }
+.kd-thumb { width: 74px; height: 54px; flex: none; border-radius: 8px; overflow: hidden; display: grid; place-items: center; background: rgba(125, 125, 125, .12); font-weight: 700; }
+.kd-thumb img, .kd-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.kd-body { flex: 1; min-width: 0; }
+.kd-body p { margin: .2rem 0 0; font-size: .82rem; }
+.kd-actions { display: flex; flex-direction: column; gap: .3rem; }
+.kd-badge { font-size: .7rem; padding: .1rem .45rem; border-radius: 999px; border: 1px solid currentColor; margin-left: .35rem; }
+.kd-active { color: #16a34a; } .kd-scheduled { color: #2563eb; }
+.kd-expired { color: #b45309; } .kd-inactive { color: #6b7280; }
+.kd-preview { margin-top: .5rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.kd-preview img, .kd-preview video { max-width: 220px; max-height: 140px; border-radius: 10px; }
+.kd-kiosks { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .3rem; }
+.kd-kiosk { display: flex; align-items: center; gap: .35rem; font-weight: 500; font-size: .85rem; }
+@media (max-width: 700px) { .kd-item { flex-wrap: wrap; } .kd-actions { flex-direction: row; } }
+
+/* ---------- Kiosk idle screen: library activities & services ---------- */
+.kiosk-idle {
+  position: fixed; inset: 0; z-index: 40; background: #0b1220; color: #f8fafc;
+  display: grid; place-items: center; padding: 3vh 4vw; animation: kioskIdleIn .35s ease;
+}
+.kiosk-idle[hidden] { display: none; }
+body.light .kiosk-idle { background: #f1f5f9; color: #0f172a; }
+@keyframes kioskIdleIn { from { opacity: 0 } to { opacity: 1 } }
+.kiosk-idle-inner { width: min(1200px, 100%); text-align: center; }
+.kiosk-idle-media { display: grid; place-items: center; }
+.kiosk-idle-media img, .kiosk-idle-media video {
+  max-width: 100%; max-height: 58vh; border-radius: 18px; object-fit: contain;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .35);
+}
+.kiosk-idle-text h2 { margin: .8rem 0 .3rem; font-size: clamp(1.4rem, 3.4vw, 2.6rem); }
+.kiosk-idle-text p { margin: 0; font-size: clamp(.95rem, 1.8vw, 1.3rem); opacity: .9; }
+.kiosk-idle-cat { text-transform: uppercase; letter-spacing: .12em; font-size: .8rem; opacity: .7; }
+.kiosk-idle-hint { margin-top: 1.4rem; font-size: .95rem; opacity: .65; }
+.kiosk-idle-dots { display: flex; gap: .4rem; justify-content: center; margin-top: .8rem; }
+.kiosk-idle-dots span { width: 9px; height: 9px; border-radius: 50%; background: currentColor; opacity: .3; }
+.kiosk-idle-dots span.on { opacity: .95; }

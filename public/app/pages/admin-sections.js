@@ -134,7 +134,9 @@ export function hoursPanel(box, { api, esc, toast }) {
         <button id="saveHours">Save working hours</button>
         <button class="ghost" id="runAutoExit">Run auto exit now</button>
       </div>
+      <div id="autoExitBox" style="margin-top:.8rem;display:none"></div>
       <p class="muted" id="hoursStatus" style="margin-top:.5rem"></p>`;
+
 
     for (const cb of hoursBox.querySelectorAll(".h-closed")) {
       cb.onchange = () => {
@@ -160,19 +162,76 @@ export function hoursPanel(box, { api, esc, toast }) {
         toast(e.message, true);
       }
     };
-    hoursBox.querySelector("#runAutoExit").onclick = async (e) => {
-      e.target.disabled = true;
-      try {
-        const r = await api("/api/settings/hours/auto-exit", { method: "POST" });
-        hoursBox.querySelector("#hoursStatus").textContent =
-          r.closed ? `Closed ${r.closed} open visit(s).` : "Nobody needed an automatic exit.";
-      } catch (err) {
-        toast(err.message, true);
-      } finally {
-        e.target.disabled = false;
-      }
+    const autoBox = hoursBox.querySelector("#autoExitBox");
+
+    const paintAutoExit = (libs) => {
+      autoBox.style.display = "";
+      autoBox.innerHTML = `
+        <div class="panel" style="padding:.8rem">
+          <h4 style="margin:0 0 .3rem">Which library should be exited?</h4>
+          <p class="muted" style="margin:0 0 .5rem">Everyone still marked inside the ticked libraries
+            will get an Exit entry, and the run is recorded in the audit log.</p>
+          <label class="row" style="gap:.4rem"><input type="checkbox" id="ae_all" checked /> All libraries</label>
+          <label class="row" style="gap:.4rem"><input type="checkbox" class="ae_pick" value="__main__" /> Main library (unassigned kiosks)</label>
+          ${libs.map((l) => `<label class="row" style="gap:.4rem">
+            <input type="checkbox" class="ae_pick" value="${esc(l.id)}" /> ${esc(l.name)}</label>`).join("")}
+          <div class="row" style="margin-top:.6rem;gap:.5rem">
+            <button id="ae_go" class="primary">Continue</button>
+            <button id="ae_cancel" class="ghost">Cancel</button>
+          </div>
+        </div>`;
+
+      const allCb = autoBox.querySelector("#ae_all");
+      const picks = [...autoBox.querySelectorAll(".ae_pick")];
+      allCb.onchange = () => { for (const c of picks) if (allCb.checked) c.checked = false; };
+      for (const c of picks) c.onchange = () => { if (c.checked) allCb.checked = false; };
+
+      autoBox.querySelector("#ae_cancel").onclick = () => { autoBox.style.display = "none"; };
+
+      autoBox.querySelector("#ae_go").onclick = async (ev) => {
+        const chosen = picks.filter((c) => c.checked).map((c) => c.value);
+        const main = chosen.includes("__main__");
+        const subs = chosen.filter((v) => v !== "__main__");
+        if (!allCb.checked && !chosen.length) return toast("Pick at least one library", true);
+
+        const requests = allCb.checked
+          ? [{ scope: "all", label: "all libraries" }]
+          : [
+              ...(main ? [{ scope: "main", label: "the main library" }] : []),
+              ...(subs.length ? [{ scope: "sub", sublibrary_ids: subs, label: `${subs.length} sublibrary(ies)` }] : []),
+            ];
+
+        const what = requests.map((r) => r.label).join(" and ");
+        if (!confirm(`Exit everyone currently inside ${what}?\n\nThis writes an Exit record for each open visit and cannot be undone.`)) return;
+
+        ev.target.disabled = true;
+        try {
+          let closed = 0;
+          for (const r of requests) {
+            const res = await api("/api/settings/hours/auto-exit", {
+              method: "POST",
+              body: { scope: r.scope, sublibrary_ids: r.sublibrary_ids || [], force: true },
+            });
+            closed += res.closed || 0;
+          }
+          autoBox.style.display = "none";
+          hoursBox.querySelector("#hoursStatus").textContent =
+            closed ? `Closed ${closed} open visit(s) in ${what}.` : "Nobody was inside.";
+          toast(closed ? `Exited ${closed} member(s)` : "Nobody was inside");
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          ev.target.disabled = false;
+        }
+      };
+    };
+
+    hoursBox.querySelector("#runAutoExit").onclick = async () => {
+      const libs = await api("/api/users/sublibraries").catch(() => []);
+      paintAutoExit(Array.isArray(libs) ? libs : []);
     };
   };
+
 
   api("/api/settings/hours").then(paintHours).catch(() => {
     hoursBox.textContent = "Could not load working hours.";

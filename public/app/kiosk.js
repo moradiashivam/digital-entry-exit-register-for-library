@@ -222,6 +222,92 @@ async function startFaceLoop(video) {
   requestAnimationFrame(loop);
 }
 
+
+/* ---------- Library activities / services: idle display ----------
+   Shown only when nobody has used the kiosk for a while. It never blocks a
+   scan: any key, touch, click or scanner input hides it immediately, and the
+   normal kiosk (palm / RFID / manual / barcode / face) keeps running behind it. */
+let idlePosts = [];
+let idleIndex = 0;
+let idleTimer = null;
+let idleSlideTimer = null;
+let idleConfig = { enabled: false, idle_seconds: 30, slide_seconds: 10 };
+let idleShowing = false;
+
+async function loadIdlePosts() {
+  try {
+    const res = await fetch(
+      `/api/public/kiosk/${encodeURIComponent(slug)}/posts?device=${encodeURIComponent(deviceId)}`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return;
+    const data = await res.json();
+    idleConfig = data;
+    idlePosts = Array.isArray(data.posts) ? data.posts : [];
+    if (!idleConfig.enabled || !idlePosts.length) hideIdle();
+    if (idleIndex >= idlePosts.length) idleIndex = 0;
+  } catch { /* kiosk keeps working without promotional content */ }
+}
+
+function paintIdleSlide() {
+  const post = idlePosts[idleIndex];
+  if (!post) return hideIdle();
+  const media = el("idleMedia");
+  if (media) {
+    media.innerHTML = post.media_url
+      ? (post.media_type === "video"
+        ? `<video src="${esc(post.media_url)}" autoplay muted loop playsinline></video>`
+        : `<img src="${esc(post.media_url)}" alt="${esc(post.title)}" />`)
+      : "";
+  }
+  el("idleCategory").textContent = post.category || "";
+  el("idleTitle").textContent = post.title || "";
+  el("idleBody").textContent = post.body || "";
+  el("idleDots").innerHTML = idlePosts
+    .map((_, i) => `<span class="${i === idleIndex ? "on" : ""}"></span>`).join("");
+}
+
+function showIdle() {
+  if (idleShowing || !idleConfig.enabled || !idlePosts.length) return;
+  idleShowing = true;
+  const box = el("idleShow");
+  box.hidden = false;
+  box.setAttribute("aria-hidden", "false");
+  paintIdleSlide();
+  clearInterval(idleSlideTimer);
+  idleSlideTimer = setInterval(() => {
+    idleIndex = (idleIndex + 1) % idlePosts.length;
+    paintIdleSlide();
+  }, Math.max(3, Number(idleConfig.slide_seconds) || 10) * 1000);
+}
+
+function hideIdle() {
+  clearInterval(idleSlideTimer);
+  if (!idleShowing) return;
+  idleShowing = false;
+  const box = el("idleShow");
+  if (box) { box.hidden = true; box.setAttribute("aria-hidden", "true"); }
+  const media = el("idleMedia");
+  if (media) media.innerHTML = "";
+}
+
+function noteActivity() {
+  hideIdle();
+  clearTimeout(idleTimer);
+  if (!idleConfig.enabled || !idlePosts.length) return;
+  idleTimer = setTimeout(showIdle, Math.max(5, Number(idleConfig.idle_seconds) || 30) * 1000);
+}
+
+async function startIdleDisplay() {
+  await loadIdlePosts();
+  for (const evt of ["pointerdown", "mousemove", "keydown", "touchstart", "wheel"]) {
+    document.addEventListener(evt, noteActivity, { passive: true });
+  }
+  // Refresh content so scheduled occasion posts start and expire on time.
+  setInterval(() => loadIdlePosts().then(() => { if (idleShowing) paintIdleSlide(); }), 60000);
+  noteActivity();
+}
+
 async function boot() {
   const res = await fetch(
     `/api/public/kiosk/${encodeURIComponent(slug)}?device=${encodeURIComponent(deviceId)}`,
@@ -272,6 +358,7 @@ async function boot() {
   }
   paintTabs();
   if (method === "Barcode" || method === "Face") startCamera(); else el("code").focus();
+  startIdleDisplay();
 }
 
 el("tabs").addEventListener("click", (e) => {
@@ -337,8 +424,36 @@ document.addEventListener("keydown", (e) => {
 });
 
 
+/**
+ * “Did You Know?” student insight cards under the scan result.
+ * Admins can supply their own item markup in Settings using the placeholders
+ * {{icon}}, {{text}} and {{category}}; otherwise the default card is used.
+ */
+function insightsHtml(out) {
+  const items = Array.isArray(out.insights) ? out.insights : [];
+  if (!items.length) return "";
+  let tpl = String(out.insights_item_html || "").trim();
+  // Guard: CSS pasted here by mistake (no {{placeholders}}) must not be shown as text.
+  if (tpl && !/\{\{\s*(icon|text|category)\s*\}\}/.test(tpl)) tpl = "";
+  const cards = items.map((i) => {
+    if (tpl) {
+      return tpl
+        .replace(/\{\{\s*icon\s*\}\}/g, esc(i.icon || ""))
+        .replace(/\{\{\s*text\s*\}\}/g, esc(i.text || ""))
+        .replace(/\{\{\s*category\s*\}\}/g, esc(i.category || ""));
+    }
+    return `<div class="insight" data-category="${esc(i.category || "")}">
+      <span class="insight-icon">${esc(i.icon || "💡")}</span>
+      <span class="insight-text">${esc(i.text || "")}</span></div>`;
+  }).join("");
+  return `<div class="kiosk-insights">
+    <p class="insights-title">${esc(out.insights_title || "Did You Know?")}</p>
+    ${cards}</div>`;
+}
+
 async function submitScan(value, methodUsed, confidence) {
   clearTimeout(resetTimer);
+  noteActivity();   // a scan always brings the normal kiosk back
   const method = methodUsed;
   const body = { institute: slug, method, device_id: deviceId };
   if (confidence != null) body.confidence = confidence;
@@ -360,7 +475,9 @@ async function submitScan(value, methodUsed, confidence) {
       el("result").innerHTML = `<div class="result ${out.action === "Entry" ? "entry" : "exit"}">
         ${photo}<h2>${esc(label)} recorded</h2>
         <p>${esc(out.member.full_name)} · ${esc(out.member.member_code)}</p>
-        <p class="muted">${new Date(out.occurred_at).toLocaleString("en-GB")}</p></div>`;
+        <p class="muted">${new Date(out.occurred_at).toLocaleString("en-GB")}</p>
+        ${insightsHtml(out)}</div>`;
+
     } else if (out.reason === "membership_expired") {
       const who = out.member_name
         ? `<p>${esc(out.member_name)}${out.member_code ? ` · ${esc(out.member_code)}` : ""}</p>` : "";

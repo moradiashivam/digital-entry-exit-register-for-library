@@ -30,7 +30,9 @@ export async function renderMasters(view, { api, esc, toast }) {
   view.innerHTML = `
     <div class="panel-head">
       <h3 style="margin:0">Master data</h3>
-      <p class="muted">These lists power the member form, the bulk import matcher and every report filter.</p>
+      <p class="muted">These lists power the member form, the bulk import matcher and every report filter.
+        Every entry has a unique 1–2 character code (letters or digits, e.g. 01, BT, CS) — type that code in the bulk upload sheet
+        and the system maps the row to this entry automatically.</p>
     </div>
     <div class="grid cols-2" style="margin-top:1rem">
       ${KINDS.map((k) => `
@@ -44,11 +46,13 @@ export async function renderMasters(view, { api, esc, toast }) {
             <span class="muted" id="count_${k.key}">0</span>
           </div>
           <p class="muted">${esc(k.hint)}</p>
-          <div id="list_${k.key}" class="row master-list"></div>
-          <div class="row master-add">
+<div class="row master-add">
+            <input id="code_${k.key}" placeholder="Code" maxlength="2" style="width:5rem;text-transform:uppercase" />
             <input id="new_${k.key}" placeholder="${esc(k.placeholder)}" style="flex:1" />
             <button data-add="${k.key}" title="Add" aria-label="Add ${esc(k.title)}">+</button>
           </div>
+          <p class="muted" style="font-size:.8rem">Letters and digits allowed (1–2 chars). Leave blank to auto-assign the next free code.</p>
+          <div id="list_${k.key}" class="master-list"></div>
         </div>`).join("")}
     </div>`;
 
@@ -57,8 +61,13 @@ export async function renderMasters(view, { api, esc, toast }) {
       const items = arr(data[k.key]);
       view.querySelector(`#count_${k.key}`).textContent = String(items.length);
       view.querySelector(`#list_${k.key}`).innerHTML = items.length
-        ? items.map((i) => `<span class="badge">${esc(i.name)}
-            <a data-del="${k.key}:${esc(i.id)}" style="cursor:pointer">&times;</a></span>`).join(" ")
+        ? `<table><thead><tr><th style="width:5rem">Code</th><th>Name</th><th style="width:2rem"></th></tr></thead>
+           <tbody>${items.map((i) => `<tr>
+              <td><input data-code="${k.key}:${esc(i.id)}" value="${esc(i.code || "")}"
+                   maxlength="2" style="width:4rem;text-transform:uppercase" /></td>
+             <td><input data-name="${k.key}:${esc(i.id)}" value="${esc(i.name)}" style="width:100%" /></td>
+             <td><a data-del="${k.key}:${esc(i.id)}" style="cursor:pointer" title="Remove">&times;</a></td>
+           </tr>`).join("")}</tbody></table>`
         : `<span class="muted">Nothing yet.</span>`;
     }
   };
@@ -75,9 +84,14 @@ export async function renderMasters(view, { api, esc, toast }) {
     try {
       if (add) {
         const input = view.querySelector(`#new_${add}`);
+        const codeInput = view.querySelector(`#code_${add}`);
         if (!input.value.trim()) return;
-        await api(`/api/masters/${add}`, { method: "POST", body: { name: input.value.trim() } });
+        await api(`/api/masters/${add}`, {
+          method: "POST",
+          body: { name: input.value.trim(), code: codeInput.value.trim() },
+        });
         input.value = "";
+        codeInput.value = "";
       } else if (del) {
         const [kind, id] = del.split(":");
         await api(`/api/masters/${kind}/${id}`, { method: "DELETE" });
@@ -89,10 +103,29 @@ export async function renderMasters(view, { api, esc, toast }) {
     }
   };
 
+  // Editing a code or a name in the table saves as soon as the field loses focus.
+  view.addEventListener("change", async (e) => {
+    const key = e.target.dataset.code || e.target.dataset.name;
+    if (!key) return;
+    const [kind, id] = key.split(":");
+    const row = e.target.closest("tr");
+    const code = row.querySelector("[data-code]").value.trim();
+    const name = row.querySelector("[data-name]").value.trim();
+    try {
+      await api(`/api/masters/${kind}/${id}`, { method: "PUT", body: { name, code } });
+      await refresh();
+      toast("Master data updated");
+    } catch (err) {
+      toast(err.message, true);
+      await refresh();
+    }
+  });
+
   view.onkeydown = (e) => {
     if (e.key !== "Enter") return;
     const id = e.target.id || "";
-    if (!id.startsWith("new_")) return;
-    view.querySelector(`[data-add="${id.slice(4)}"]`)?.click();
+    if (!id.startsWith("new_") && !id.startsWith("code_")) return;
+    view.querySelector(`[data-add="${id.slice(id.indexOf("_") + 1)}"]`)?.click();
   };
 }
+

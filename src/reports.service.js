@@ -108,9 +108,12 @@ export async function getVisitDetailReport(instituteId, filters = {}) {
   const offset = (page - 1) * pageSize;
 
   const total = await one(`SELECT COUNT(*) AS n FROM (${visitSql(where)}) t`, params);
+  // LIMIT/OFFSET are inlined as validated integers: several MySQL builds reject
+  // placeholders there ("Incorrect arguments to mysqld_stmt_execute").
   const rows = await q(
-    `${visitSql(where)} ORDER BY ${sort} ${order}, entry_time DESC LIMIT ? OFFSET ?`,
-    [...params, pageSize, offset],
+    `${visitSql(where)} ORDER BY ${sort} ${order}, entry_time DESC ` +
+      `LIMIT ${Math.trunc(pageSize)} OFFSET ${Math.trunc(offset)}`,
+    params,
   );
 
   return {
@@ -312,4 +315,89 @@ export async function listDesignations(instituteId) {
     [instituteId],
   );
   return rows.map((r) => r.designation);
+}
+
+/* ------------------------------------------------------------------ *
+ * Student visit analysis — Sankey flow (Course → Department → Time).
+ * Visits are counted as Entry events, bucketed into 3-hour periods on
+ * the university's own wall clock (08:00–23:00, plus "Other" outside).
+ * ------------------------------------------------------------------ */
+
+/** 3-hour periods used by the Sankey graph. */
+export const TIME_PERIODS = [
+  { key: "08-11", label: "08:00–11:00", from: 8, to: 11 },
+  { key: "11-14", label: "11:00–14:00", from: 11, to: 14 },
+  { key: "14-17", label: "14:00–17:00", from: 14, to: 17 },
+  { key: "17-20", label: "17:00–20:00", from: 17, to: 20 },
+  { key: "20-23", label: "20:00–23:00", from: 20, to: 23 },
+];
+
+const periodFor = (hour) =>
+  TIME_PERIODS.find((p) => hour >= p.from && hour < p.to)?.label || "Other hours";
+
+export async function getVisitFlowSankey(instituteId, filters = {}) {
+  const { where, params } = baseFilters(instituteId, filters);
+  const rows = await q(
+    `SELECT COALESCE(NULLIF(c.name, ''), 'Unassigned') AS course,
+            COALESCE(NULLIF(d.name, ''), 'Unassigned') AS department,
+            HOUR(e.occurred_at) AS hr,
+            COUNT(*) AS visits,
+            COUNT(DISTINCT e.member_id) AS students
+     FROM entry_exit_logs e
+     JOIN members m ON m.id = e.member_id
+     LEFT JOIN courses c ON c.id = m.course_id
+     LEFT JOIN departments d ON d.id = m.department_id
+     WHERE e.institute_id = ? AND e.action = 'Entry' ${where}
+     GROUP BY course, department, hr`,
+    params,
+  );
+
+  const add = (map, key, n) => map.set(key, (map.get(key) || 0) + n);
+  const courseDept = new Map();
+  const deptPeriod = new Map();
+  const courses = new Map();
+  const departments = new Map();
+  const periods = new Map();
+  let total = 0;
+
+  for (const r of rows) {
+    const visits = num(r.visits);
+    const period = periodFor(Number(r.hr));
+    total += visits;
+    add(courseDept, `${r.course}\u0000${r.department}`, visits);
+    add(deptPeriod, `${r.department}\u0000${period}`, visits);
+    add(courses, r.course, visits);
+    add(departments, r.department, visits);
+    add(periods, period, visits);
+  }
+
+  const list = (map) => [...map.entries()]
+    .map(([name, visits]) => ({ name, visits }))
+    .sort((a, b) => b.visits - a.visits);
+
+  const links = (map) => [...map.entries()]
+    .map(([k, visits]) => {
+      const [source, target] = k.split("\u0000");
+      return { source, target, visits };
+    })
+    .sort((a, b) => b.visits - a.visits);
+
+  const top = (arr) => arr[0] || null;
+  const periodOrder = [...TIME_PERIODS.map((p) => p.label), "Other hours"];
+
+  return {
+    total_visits: total,
+    courses: list(courses),
+    departments: list(departments),
+    periods: periodOrder
+      .filter((label) => periods.has(label))
+      .map((label) => ({ name: label, visits: periods.get(label) })),
+    course_department: links(courseDept),
+    department_period: links(deptPeriod),
+    highlights: {
+      top_course: top(list(courses)),
+      top_department: top(list(departments)),
+      peak_period: top(list(periods)),
+    },
+  };
 }

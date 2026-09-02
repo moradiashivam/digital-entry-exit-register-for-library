@@ -2,6 +2,8 @@ import { Router } from "express";
 import { q, one, uuid, localDate, localDateTime } from "../db.js";
 import { kioskEnabled } from "../auth.js";
 import { patronInformation, maskId } from "../sip2.js";
+import { studentInsights, pickInsights, DEFAULT_CATEGORIES } from "../insights.service.js";
+import { activePostsFor } from "./display.routes.js";
 
 const router = Router();
 
@@ -35,6 +37,25 @@ router.get("/kiosk/:slug", async (req, res) => {
     settings: settings ?? { institution_name: inst.name },
     devices: all.filter((d) => Number(d.is_active) === 1),
     device,
+  });
+});
+
+
+/** Library activities / services this kiosk should show while it is idle. */
+router.get("/kiosk/:slug/posts", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const inst = await one("SELECT id FROM institutes WHERE slug = ?", [req.params.slug]);
+  if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
+  const settings = await one(
+    "SELECT display_enabled, display_idle_seconds, display_slide_seconds FROM kiosk_settings WHERE institute_id = ?",
+    [inst.id],
+  );
+  const enabled = Number(settings?.display_enabled) === 1;
+  res.json({
+    enabled,
+    idle_seconds: Number(settings?.display_idle_seconds) || 30,
+    slide_seconds: Number(settings?.display_slide_seconds) || 10,
+    posts: enabled ? await activePostsFor(inst.id, req.query.device) : [],
   });
 });
 
@@ -237,6 +258,27 @@ router.post("/scan-event", async (req, res) => {
   const action = !openElsewhere && last?.action === "Entry" ? "Exit" : "Entry";
   await writeLog(action, method, deviceId);
 
+  // “Did You Know?” — personal library facts for this student, if switched on.
+  let insights = [];
+  let insightsTitle = "Did You Know?";
+  let insightsItemHtml = "";
+  try {
+    const cfg = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [inst.id]);
+    const on = cfg ? Number(cfg.insights_enabled) !== 0 : false;
+    const forThis = action === "Entry"
+      ? Number(cfg?.insights_on_entry ?? 1) !== 0
+      : Number(cfg?.insights_on_exit ?? 1) !== 0;
+    if (on && forThis) {
+      insightsTitle = cfg.insights_title || insightsTitle;
+      insightsItemHtml = cfg.insights_item_html || "";
+      const all = await studentInsights(inst.id, member.id, {
+        categories: cfg.insights_categories || DEFAULT_CATEGORIES,
+        monthly_goal: Number(cfg.insights_goal || 0),
+      });
+      insights = pickInsights(all, cfg.insights_count ?? 2);
+    }
+  } catch { /* insights are decorative — never block a scan */ }
+
   res.json({
     status: "ok",
     action,
@@ -247,8 +289,12 @@ router.post("/scan-event", async (req, res) => {
       full_name: member.full_name,
       photo_url: member.photo_url,
     },
+    insights,
+    insights_title: insightsTitle,
+    insights_item_html: insightsItemHtml,
     occurred_at: recordedAt,
   });
+
 });
 
 /**

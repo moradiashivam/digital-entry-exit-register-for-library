@@ -51,8 +51,10 @@ CREATE TABLE IF NOT EXISTS courses (
   id CHAR(36) NOT NULL PRIMARY KEY,
   institute_id CHAR(36) NOT NULL,
   name VARCHAR(150) NOT NULL,
+  code CHAR(2) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_course (institute_id, name),
+  UNIQUE KEY uq_course_code (institute_id, code),
   CONSTRAINT fk_course_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -60,8 +62,10 @@ CREATE TABLE IF NOT EXISTS departments (
   id CHAR(36) NOT NULL PRIMARY KEY,
   institute_id CHAR(36) NOT NULL,
   name VARCHAR(150) NOT NULL,
+  code CHAR(2) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_department (institute_id, name),
+  UNIQUE KEY uq_department_code (institute_id, code),
   CONSTRAINT fk_dept_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -69,8 +73,10 @@ CREATE TABLE IF NOT EXISTS academic_years (
   id CHAR(36) NOT NULL PRIMARY KEY,
   institute_id CHAR(36) NOT NULL,
   name VARCHAR(60) NOT NULL,
+  code CHAR(2) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_year (institute_id, name),
+  UNIQUE KEY uq_year_code (institute_id, code),
   CONSTRAINT fk_year_inst FOREIGN KEY (institute_id) REFERENCES institutes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

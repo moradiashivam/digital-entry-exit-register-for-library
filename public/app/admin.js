@@ -9,6 +9,7 @@ import { renderMasters } from "/app/pages/masters.js";
 import { renderInstitutes } from "/app/pages/institutes.js";
 import { renderAudit } from "/app/pages/audit.js";
 import { renderMasterSetting } from "/app/pages/master-setting.js";
+import { renderKioskDisplay } from "/app/pages/kiosk-display.js";
 import { renderOwnerOverview } from "/app/pages/owner-overview.js";
 import { renderOwnerTenants } from "/app/pages/owner-tenants.js";
 import { renderOwnerPlans } from "/app/pages/owner-plans.js";
@@ -51,6 +52,7 @@ const TENANT_PAGES = {
   reports: { title: "Reports", subtitle: "Visit, student, course, footfall, absentee and location reports with export", render: renderReports },
   audit: { title: "Audit trail", subtitle: "Every administrative action, append-only", render: renderAudit },
   mastersetting: { title: "Master setting", subtitle: "Sublibraries, sublibrary users, module and kiosk-wise permissions", render: renderMasterSetting },
+  display: { title: "Library activities", subtitle: "Services, events and announcements shown on idle kiosk screens", render: renderKioskDisplay },
   settings: { title: "Kiosk settings", subtitle: "Branding and input methods for your kiosk", render: renderSettings },
   docs: { title: "Documentation", subtitle: "Complete guide for university administrators", render: renderAdminDocs },
 };
@@ -80,6 +82,7 @@ const PAGE_MODULE = {
   reports: "reports",
   audit: "audit",
   settings: "kiosks",
+  display: "kiosks",
   mastersetting: "master_setting",
 };
 

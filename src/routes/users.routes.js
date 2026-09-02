@@ -39,6 +39,35 @@ router.get("/me/access", withInstitute(isMember), (req, res) => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * Saved preferences for the signed-in user (per university).
+ * Stored in the database so they follow the login to any computer.
+ * ------------------------------------------------------------------ */
+const PREF_KEYS = new Set(["dashboard_filters"]);
+
+router.get("/me/preferences/:key", withInstitute(isMember), async (req, res) => {
+  if (!PREF_KEYS.has(req.params.key)) return res.status(404).json({ error: "Unknown preference" });
+  const row = await one(
+    "SELECT pref_value FROM user_preferences WHERE user_id = ? AND institute_id = ? AND pref_key = ?",
+    [req.user.id, req.institute.id, req.params.key],
+  );
+  let value = null;
+  try { value = row?.pref_value ? JSON.parse(row.pref_value) : null; } catch { value = null; }
+  res.json({ key: req.params.key, value });
+});
+
+router.put("/me/preferences/:key", withInstitute(isMember), async (req, res) => {
+  if (!PREF_KEYS.has(req.params.key)) return res.status(404).json({ error: "Unknown preference" });
+  const value = JSON.stringify(req.body?.value ?? null).slice(0, 4000);
+  await q(
+    `INSERT INTO user_preferences (user_id, institute_id, pref_key, pref_value)
+     VALUES (?,?,?,?)
+     ON DUPLICATE KEY UPDATE pref_value = VALUES(pref_value)`,
+    [req.user.id, req.institute.id, req.params.key, value],
+  );
+  res.json({ ok: true });
+});
+
 /** Reference data for the Master Setting screen. */
 router.get("/meta", withInstitute(isMember), requireInstituteAdmin, async (req, res) => {
   const [sublibraries, kiosks, locations] = await Promise.all([

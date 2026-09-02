@@ -23,6 +23,19 @@ const TOGGLES = [
   ["multi_kiosk_transfer", "Automatic transfer between kiosks (a visit opened at one kiosk closes there and re-opens here)"],
 ];
 
+// Insight types offered on the kiosk (must match src/insights.service.js).
+const INSIGHT_CATEGORIES = [
+  ["time", "Library time facts (total / average / longest session)"],
+  ["visits", "Visit counts (total visits, different days, this month)"],
+  ["streak", "Visit streaks (current and longest run of days)"],
+  ["milestone", "Milestone celebrations (50th visit, 100 hours…)"],
+  ["progress", "Personal progress (this month vs last month)"],
+  ["stats", "Interesting personal statistics (favourite day, averages)"],
+  ["next", "Next achievement / goal"],
+];
+const DEFAULT_CATEGORIES = INSIGHT_CATEGORIES.map(([id]) => id).join(",");
+
+
 
 export async function renderSettings(view, { api, esc, toast }) {
   const s = await api("/api/settings/kiosk");
@@ -91,7 +104,54 @@ export async function renderSettings(view, { api, esc, toast }) {
           </div>
         </div>
 
+        <div class="panel">
+          <h3>“Did You Know?” student insights</h3>
+          <p class="muted">After every scan the kiosk can show personal library facts for that student —
+            time spent in the library, visits, streaks, milestones and the next goal.
+            Everything below is customisable, including your own card markup and CSS.</p>
+          <div class="toggle-grid">
+            <label class="toggle-item"><input type="checkbox" id="s_insights_enabled" ${s.insights_enabled ? "checked" : ""} />
+              <span>Show insights on the kiosk</span></label>
+            <label class="toggle-item"><input type="checkbox" id="s_insights_on_entry" ${s.insights_on_entry ? "checked" : ""} />
+              <span>Show on entry scans</span></label>
+            <label class="toggle-item"><input type="checkbox" id="s_insights_on_exit" ${s.insights_on_exit ? "checked" : ""} />
+              <span>Show on exit scans</span></label>
+          </div>
+          <div class="field-grid" style="margin-top:.6rem">
+            <div class="field"><label for="s_insights_title">Section heading</label>
+              <input id="s_insights_title" value="${esc(s.insights_title ?? "Did You Know?")}" /></div>
+            <div class="field"><label for="s_insights_count">Insights shown per scan (1–3)</label>
+              <input id="s_insights_count" type="number" min="1" max="3" value="${esc(s.insights_count ?? 2)}" /></div>
+            <div class="field"><label for="s_insights_goal">Monthly visit goal per student (0 = off)</label>
+              <input id="s_insights_goal" type="number" min="0" max="200" value="${esc(s.insights_goal ?? 0)}" /></div>
+          </div>
+          <p class="muted" style="margin-top:.7rem">Insight types to use</p>
+          <div class="toggle-grid">
+            ${INSIGHT_CATEGORIES.map(([id, label]) => `
+              <label class="toggle-item"><input type="checkbox" data-cat="${id}"
+                ${(s.insights_categories ?? DEFAULT_CATEGORIES).split(",").includes(id) ? "checked" : ""} />
+                <span>${esc(label)}</span></label>`).join("")}
+          </div>
+          <p class="muted" style="margin-top:.8rem">Custom card markup (optional) — placeholders
+            <code>{{icon}}</code>, <code>{{text}}</code>, <code>{{category}}</code>. Leave empty for the default card.
+            Style with <code>.kiosk-insights</code>, <code>.insights-title</code>, <code>.insight</code>,
+            <code>.insight-icon</code>, <code>.insight-text</code> in the custom CSS editor.</p>
+          <textarea id="s_insights_item_html" rows="4" spellcheck="false"
+            style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.82rem"
+            placeholder="&lt;div class=&quot;insight&quot;&gt;{{icon}} {{text}}&lt;/div&gt;">${esc(s.insights_item_html ?? "")}</textarea>
+          <div class="row" style="margin-top:.7rem">
+            <button id="saveInsights">Save insights settings</button>
+          </div>
+          <p class="muted" style="margin-top:.9rem">Preview for a student</p>
+          <div class="row">
+            <input id="insightCode" placeholder="Membership number" style="max-width:220px" />
+            <button class="ghost" id="previewInsights">Preview</button>
+          </div>
+          <div id="insightPreview" class="muted" style="margin-top:.6rem"></div>
+        </div>
+
       </div>
+
 
 
 
@@ -252,6 +312,45 @@ export async function renderSettings(view, { api, esc, toast }) {
     cssEditor.value = "";
     applyPreviewCss();
     saveCss("");
+  };
+
+  /* ---------- “Did You Know?” student insights ---------- */
+  const insightCats = () =>
+    [...view.querySelectorAll("[data-cat]")].filter((c) => c.checked).map((c) => c.dataset.cat).join(",");
+
+  view.querySelector("#saveInsights").onclick = async () => {
+    const body = {
+      insights_enabled: view.querySelector("#s_insights_enabled").checked,
+      insights_on_entry: view.querySelector("#s_insights_on_entry").checked,
+      insights_on_exit: view.querySelector("#s_insights_on_exit").checked,
+      insights_title: view.querySelector("#s_insights_title").value.trim() || "Did You Know?",
+      insights_count: Math.min(3, Math.max(1, Number(view.querySelector("#s_insights_count").value) || 2)),
+      insights_goal: Math.max(0, Number(view.querySelector("#s_insights_goal").value) || 0),
+      insights_categories: insightCats(),
+      insights_item_html: view.querySelector("#s_insights_item_html").value.trim(),
+    };
+    try {
+      await api("/api/settings/kiosk", { method: "PUT", body });
+      toast("Insights settings saved");
+      reloadPreview();
+    } catch (e) { toast(e.message, true); }
+  };
+
+  view.querySelector("#previewInsights").onclick = async () => {
+    const code = view.querySelector("#insightCode").value.trim();
+    const box = view.querySelector("#insightPreview");
+    if (!code) return toast("Enter a membership number", true);
+    box.textContent = "Loading…";
+    try {
+      const out = await api(`/api/settings/insights/preview?code=${encodeURIComponent(code)}`);
+      box.innerHTML = out.all.length
+        ? `<strong>${esc(out.member.full_name)}</strong>
+           <div class="kiosk-insights"><p class="insights-title">${esc(out.title)}</p>
+           ${out.shown.map((i) => `<div class="insight"><span class="insight-icon">${esc(i.icon)}</span>
+             <span class="insight-text">${esc(i.text)}</span></div>`).join("")}</div>
+           <p class="muted" style="margin-top:.5rem">${out.all.length} insights available for this student — the kiosk rotates between them.</p>`
+        : `<span class="muted">No library activity yet for ${esc(out.member.full_name)}.</span>`;
+    } catch (e) { box.textContent = e.message; }
   };
 
 

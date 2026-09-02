@@ -210,9 +210,10 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
           <label for="reportType">Report</label>
           <select id="reportType" style="width:100%">
             ${Object.entries(REPORTS).map(([k, r]) => `<option value="${k}"${k === reportKey ? " selected" : ""}>${esc(r.label)}</option>`).join("")}
+            <option value="__sankey">9 · Visit analysis (Sankey graph)</option>
           </select>
         </div>
-        <div class="row">
+<div class="row" id="exportBar">
           ${canExport() ? `
           <button class="ghost" id="exportCsv">Export CSV</button>
           <button class="ghost" id="exportXls">Export Excel</button>
@@ -237,7 +238,7 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
         <button class="ghost rep-cal-today" id="todayBtn" style="width:100%">Today</button>
       </div>
 
-      <div class="panel" style="flex:1;min-width:420px">
+      <div class="panel" id="tablePanel" style="flex:1;min-width:420px">
         <div class="row" id="filterBar">
           <div data-f="dates"><label for="from">From</label><input id="from" type="date" value="${daysAgo(6)}" /></div>
           <div data-f="dates"><label for="to">To</label><input id="to" type="date" value="${today}" /></div>
@@ -283,7 +284,7 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
       </div>
     </div>
 
-    <div class="panel" style="margin-top:1rem">
+    <div class="panel" id="failedPanel" style="margin-top:1rem">
       <h3>Failed scans</h3>
       <table><thead><tr><th>Time</th><th>Attempted</th><th>Reason</th><th>Method</th><th>Device</th></tr></thead>
       <tbody id="failed"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
@@ -291,7 +292,28 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
 
   // Missing elements (e.g. export buttons hidden for restricted accounts) return
   // a harmless stub so handler wiring below never throws.
-  const $ = (s) => view.querySelector(s) || {};
+const $ = (s) => view.querySelector(s) || {};
+  // When "9 · Visit analysis (Sankey graph)" is picked, show only the graph —
+  // hide the calendar, report table, export bar, pager and failed-scan details.
+  let showingSankey = false;
+  const showSankeyOnly = () => {
+    showingSankey = true;
+    $("#calPanel").style.display = "none";
+    $("#tablePanel").style.display = "none";
+    $("#failedPanel").style.display = "none";
+    $("#exportBar").style.display = "none";
+    $("#reportHint").style.display = "none";
+    if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  };
+  const showStandardView = () => {
+    showingSankey = false;
+    $("#calPanel").style.display = "";
+    $("#tablePanel").style.display = "";
+    $("#failedPanel").style.display = "";
+    $("#exportBar").style.display = "";
+    $("#reportHint").style.display = "";
+    applyLayout();
+  };
   const cfg = () => REPORTS[reportKey];
   const activeColumns = () => cfg().columns.filter((c) => visible[c.key] !== false);
 
@@ -489,7 +511,17 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
     </table>`;
   };
 
-  $("#reportType").onchange = (e) => switchReport(e.target.value).catch((err) => toast(err.message, true));
+$("#reportType").onchange = (e) => {
+    if (e.target.value === "__sankey") {
+      // Sankey is a graph, not a table report: show only the graph panel.
+      e.target.value = reportKey;
+      showSankeyOnly();
+      view.querySelector("#sankeyPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (showingSankey) showStandardView();
+    switchReport(e.target.value).catch((err) => toast(err.message, true));
+  };
   $("#apply").onclick = () => { page = 1; load().catch((e) => toast(e.message, true)); };
   $("#pageSize").onchange = (e) => { pageSize = Number(e.target.value); page = 1; load().catch((err) => toast(err.message, true)); };
   $("#prevPage").onclick = () => { if (page > 1) { page -= 1; load().catch((e) => toast(e.message, true)); } };
@@ -607,4 +639,11 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
     : `<tr><td colspan="5" class="muted">No failed scans recorded.</td></tr>`;
 
   await switchReport(reportKey);
+
+  // Student visit analysis (Course → Department → Time period) — own filters.
+  const sankeyHost = document.createElement("div");
+  view.appendChild(sankeyHost);
+  import("/app/pages/sankey.js")
+    .then((m) => m.mountSankey(sankeyHost, { api, esc, toast }, masters))
+    .catch((e) => { sankeyHost.innerHTML = `<div class="panel"><p class="muted">Visit analysis unavailable: ${esc(e.message)}</p></div>`; });
 }

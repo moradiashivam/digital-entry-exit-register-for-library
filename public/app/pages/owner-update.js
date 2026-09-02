@@ -84,6 +84,22 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
 
 
       <div class="panel" style="margin-top:1rem">
+        <h3 style="margin-top:0">Node modules (security &amp; versions)</h3>
+        <p class="muted">Check the installed Node.js packages for newer versions and known security advisories,
+          then update them from here — no command line needed. Restart the application after an update.</p>
+        <div class="row" style="align-items:center">
+          <button class="ghost" id="nmScan">Check node modules</button>
+          <button class="ghost" id="nmAuditFix" disabled>Fix security issues (safe)</button>
+          <button class="ghost" id="nmAuditForce" disabled>Force fix (may break)</button>
+          <button class="ghost" id="nmUpdateAll" disabled>Update all (within safe range)</button>
+          <button id="nmInstallSel" disabled>Update selected to latest</button>
+        </div>
+        <p class="muted" id="nmInfo">Not checked yet.</p>
+        <div id="nmResult"></div>
+        <div id="nmLog" class="muted" style="margin-top:.6rem"></div>
+      </div>
+
+      <div class="panel" style="margin-top:1rem">
         <h3 style="margin-top:0">Update application</h3>
         <p class="muted">Upload the new version as a ZIP file. It must contain <code>package.json</code> and
           <code>src/server.js</code>, and may contain a <code>db</code> folder with <code>.sql</code> upgrade scripts.
@@ -295,6 +311,111 @@ export async function renderOwnerUpdate(view, { api, esc, toast, fmtDate }) {
           /* ignore */
         }
       }
+    };
+
+    /* ---- Node modules (npm) ---- */
+    const nmInfo = view.querySelector("#nmInfo");
+    const nmResult = view.querySelector("#nmResult");
+    const nmLog = view.querySelector("#nmLog");
+    const nmButtons = ["#nmAuditFix", "#nmAuditForce", "#nmUpdateAll", "#nmInstallSel"].map((s) => view.querySelector(s));
+    const sevColour = (s) =>
+      s === "critical" || s === "high" ? "var(--danger)" : s === "moderate" ? "#b26a00" : "var(--muted)";
+
+    const renderModules = (d) => {
+      const sc = d.severity_counts || {};
+      const chips = ["critical", "high", "moderate", "low"]
+        .map((k) => `<span style="color:${sevColour(k)};font-weight:600">${esc(sc[k] || 0)} ${k}</span>`)
+        .join(" · ");
+      nmInfo.innerHTML = `Checked ${esc(fmtDate(d.checked_at))} · ${esc(d.outdated_count)} outdated of
+        ${esc(d.total_dependencies)} packages · vulnerabilities: ${chips}
+        ${arr(d.errors).length ? `<br><span style="color:var(--danger)">${esc(d.errors.join(" "))}</span>` : ""}`;
+
+      nmResult.innerHTML = `
+        ${
+          arr(d.vulnerabilities).length
+            ? `<h4>Security advisories</h4><div style="overflow:auto"><table><thead><tr><th>Package</th><th>Severity</th>
+                 <th>Issue</th><th>Fix</th></tr></thead><tbody>${d.vulnerabilities
+                   .map(
+                     (v) => `<tr><td>${esc(v.name)}${v.direct ? "" : ' <span class="muted">(indirect)</span>'}</td>
+                       <td style="color:${sevColour(v.severity)};font-weight:600">${esc(v.severity)}</td>
+                       <td>${esc(v.via.join("; ") || "—")}${
+                         v.url ? ` · <a href="${esc(v.url)}" target="_blank" rel="noopener">details</a>` : ""
+                       }</td>
+                       <td>${v.fix_available ? (v.fix_is_major ? "Fix needs force" : "Fix available") : "No fix yet"}</td></tr>`,
+                   )
+                   .join("")}</tbody></table></div>`
+            : `<p class="muted">No known security advisories in the installed packages.</p>`
+        }
+        ${
+          arr(d.outdated).length
+            ? `<h4>Outdated packages</h4><div style="overflow:auto"><table><thead><tr><th></th><th>Package</th>
+                 <th>Installed</th><th>Safe update</th><th>Latest</th></tr></thead><tbody>${d.outdated
+                   .map(
+                     (p) => `<tr><td><input type="checkbox" class="nmPick" value="${esc(p.name)}" /></td>
+                       <td>${esc(p.name)}</td><td>${esc(p.current || "—")}</td><td>${esc(p.wanted || "—")}</td>
+                       <td${p.major ? ' style="color:#b26a00;font-weight:600"' : ""}>${esc(p.latest || "—")}</td></tr>`,
+                   )
+                   .join("")}</tbody></table></div>
+               <p class="muted">A latest version shown in orange is a major upgrade — test it before using it in production.</p>`
+            : `<p class="muted">Every package is up to date.</p>`
+        }`;
+      nmButtons.forEach((b) => (b.disabled = false));
+    };
+
+    const nmLine = (steps) => {
+      nmLog.innerHTML = arr(steps)
+        .map((st) => {
+          const colour =
+            st.level === "error" ? "var(--danger)" : st.level === "success" ? "var(--ok, #1a7f37)" : "inherit";
+          return `<div style="color:${colour}">${esc(st.message)}</div>`;
+        })
+        .join("");
+    };
+
+    const nmScan = view.querySelector("#nmScan");
+    const runScan = async () => {
+      nmScan.disabled = true;
+      nmButtons.forEach((b) => (b.disabled = true));
+      nmInfo.textContent = "Checking npm for newer versions and security advisories… this can take a minute.";
+      try {
+        renderModules((await api("/api/update/modules")) || {});
+      } catch (e) {
+        nmInfo.textContent = e.message;
+        toast(e.message, true);
+      } finally {
+        nmScan.disabled = false;
+      }
+    };
+    nmScan.onclick = runScan;
+
+    const runModuleUpdate = async (mode, packages, question) => {
+      if (!confirm(question)) return;
+      nmScan.disabled = true;
+      nmButtons.forEach((b) => (b.disabled = true));
+      nmLog.textContent = "Running npm… please wait, do not close this page.";
+      try {
+        const r = await api("/api/update/modules/update", { method: "POST", body: { mode, packages } });
+        nmLine(r.steps);
+        toast(r.ok ? "Node modules updated. Restart the application." : "npm reported a problem — see the log.", !r.ok);
+      } catch (e) {
+        nmLog.innerHTML = `<div style="color:var(--danger)">${esc(e.message)}</div>`;
+        toast(e.message, true);
+      } finally {
+        nmScan.disabled = false;
+        await runScan();
+      }
+    };
+
+    view.querySelector("#nmAuditFix").onclick = () =>
+      runModuleUpdate("audit-fix", [], "Apply the safe security fixes (npm audit fix)?");
+    view.querySelector("#nmAuditForce").onclick = () =>
+      runModuleUpdate("audit-fix-force", [], "Force the security fixes? This can install major versions that change behaviour.");
+    view.querySelector("#nmUpdateAll").onclick = () =>
+      runModuleUpdate("update", [], "Update all packages within their safe version range?");
+    view.querySelector("#nmInstallSel").onclick = () => {
+      const picked = [...view.querySelectorAll(".nmPick:checked")].map((c) => c.value);
+      if (!picked.length) return toast("Tick the packages you want to update first.", true);
+      runModuleUpdate("install", picked, `Update ${picked.length} package(s) to the latest version?`);
     };
 
     const restartStatus = view.querySelector("#restartStatus");

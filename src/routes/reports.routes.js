@@ -14,6 +14,8 @@ import {
   getAbsenteeReport,
   listLocations,
   listDesignations,
+  getVisitFlowSankey,
+  TIME_PERIODS,
 } from "../reports.service.js";
 
 const router = Router();
@@ -299,6 +301,12 @@ router.get("/location-summary", withInstitute(canViewReports), requireModule("re
 
 router.get("/footfall", withInstitute(canViewReports), requireModule("reports"), requireExport, async (req, res) => {
   res.json(await getDailyFootfallReport(req.institute.id, filtersFrom(req)));
+});
+
+/** Student visit analysis — Course → Department → Time period flow. */
+router.get("/sankey", withInstitute(canViewReports), requireModule("reports"), async (req, res) => {
+  const data = await getVisitFlowSankey(req.institute.id, filtersFrom(req));
+  res.json({ ...data, time_periods: TIME_PERIODS.map((p) => p.label) });
 });
 
 router.get("/inside", withInstitute(canViewReports), requireModule("reports"), requireExport, async (req, res) => {

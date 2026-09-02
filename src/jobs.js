@@ -92,10 +92,17 @@ export async function runExpiryJob() {
 /**
  * Auto-exit: anybody still marked inside after the library's closing time for the
  * day they entered gets an Exit row stamped at that closing time (method "Auto").
+ *
+ * Options (used by the manual "Run auto exit now" button):
+ *   scope          "all" (default) | "main" | "sub"
+ *   sublibraryIds  ids to include when scope is "sub"
+ *   force          exit everyone still inside, even before closing time
  */
-export async function autoExitInstitute(instituteId) {
+export async function autoExitInstitute(instituteId, opts = {}) {
+  const scope = opts.scope || "all";
+  const force = !!opts.force;
   const hours = await q("SELECT * FROM library_hours WHERE institute_id = ?", [instituteId]);
-  if (!hours.length) return 0;
+  if (!hours.length && !force) return 0;
   const byDay = new Map(hours.map((h) => [Number(h.weekday), h]));
 
   // Calendar overrides (holidays / custom timings) win over the weekly rule.
@@ -104,9 +111,30 @@ export async function autoExitInstitute(instituteId) {
   const byDate = new Map(special.map((s) => [String(s.day).slice(0, 10), s]));
   const dateKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+  // Which terminals count for this run (library-wise selection).
+  let deviceFilter = null;
+  if (scope !== "all") {
+    const kiosks = await q(
+      "SELECT device_id, sublibrary_id FROM kiosk_devices WHERE institute_id = ?",
+      [instituteId],
+    ).catch(() => []);
+    const wanted = new Set((opts.sublibraryIds || []).map(String));
+    const ids = kiosks
+      .filter((k) => (scope === "main" ? !k.sublibrary_id : wanted.has(String(k.sublibrary_id))))
+      .map((k) => k.device_id);
+    // Scans from terminals that were never registered belong to the main library.
+    if (scope === "main") {
+      const known = kiosks.map((k) => k.device_id);
+      deviceFilter = { ids, unknownCountsAsMain: true, known };
+    } else {
+      deviceFilter = { ids, unknownCountsAsMain: false, known: [] };
+    }
+    if (!ids.length && !deviceFilter.unknownCountsAsMain) return 0;
+  }
+
   // Latest log per member — an "Entry" means they are still inside.
   const open = await q(
-    `SELECT l.member_id, l.occurred_at
+    `SELECT l.member_id, l.occurred_at, l.device_id
      FROM entry_exit_logs l
      JOIN (SELECT member_id, MAX(occurred_at) AS last_at
            FROM entry_exit_logs WHERE institute_id = ? GROUP BY member_id) x
@@ -115,35 +143,52 @@ export async function autoExitInstitute(instituteId) {
     [instituteId, instituteId],
   );
 
+  const inScope = (device) => {
+    if (!deviceFilter) return true;
+    const id = String(device ?? "");
+    if (deviceFilter.ids.includes(id)) return true;
+    return deviceFilter.unknownCountsAsMain && !deviceFilter.known.includes(id);
+  };
+
+  const stampOf = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ` +
+    `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+
   let closed = 0;
   const now = new Date();
   for (const row of open) {
+    if (!inScope(row.device_id)) continue;
     const entry = new Date(row.occurred_at);
     if (Number.isNaN(entry.getTime())) continue;
     const rule = byDate.get(dateKey(entry)) || byDay.get(entry.getDay());
-    if (!rule || !Number(rule.auto_exit) || Number(rule.is_closed)) continue;
 
-    const [oh, om] = String(rule.open_time).split(":").map(Number);
-    const [ch, cm] = String(rule.close_time).split(":").map(Number);
-    const close = new Date(entry);
-    close.setHours(ch || 0, cm || 0, 0, 0);
-    // Overnight libraries: closing time earlier than opening time means "next day".
-    if ((ch * 60 + cm) <= (oh * 60 + om)) close.setDate(close.getDate() + 1);
-    if (close <= entry) close.setDate(close.getDate() + 1);
-    if (now < close) continue;
+    let at = null;
+    if (rule && Number(rule.auto_exit) && !Number(rule.is_closed)) {
+      const [oh, om] = String(rule.open_time).split(":").map(Number);
+      const [ch, cm] = String(rule.close_time).split(":").map(Number);
+      const close = new Date(entry);
+      close.setHours(ch || 0, cm || 0, 0, 0);
+      // Overnight libraries: closing time earlier than opening time means "next day".
+      if ((ch * 60 + cm) <= (oh * 60 + om)) close.setDate(close.getDate() + 1);
+      if (close <= entry) close.setDate(close.getDate() + 1);
+      if (now >= close) at = close;
+    }
+    // Manual run: whoever the closing-time rule does not cover is exited right now.
+    if (!at) {
+      if (!force) continue;
+      at = now > entry ? now : new Date(entry.getTime() + 60000);
+    }
 
-    const stamp = close.toISOString().slice(0, 19).replace("T", " ");
-    const local = `${close.getFullYear()}-${String(close.getMonth() + 1).padStart(2, "0")}-${String(close.getDate()).padStart(2, "0")} ` +
-      `${String(close.getHours()).padStart(2, "0")}:${String(close.getMinutes()).padStart(2, "0")}:00`;
     await q(
       `INSERT INTO entry_exit_logs (id, institute_id, member_id, action, method, device_id, occurred_at)
        VALUES (UUID(), ?, ?, 'Exit', 'Auto', 'auto-close', ?)`,
-      [instituteId, row.member_id, local || stamp],
+      [instituteId, row.member_id, stampOf(at)],
     );
     closed += 1;
   }
   return closed;
 }
+
 
 /** Sweeps every university for people left inside after closing time. */
 export async function runAutoExitJob() {

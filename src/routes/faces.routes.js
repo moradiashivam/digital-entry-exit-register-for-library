@@ -39,7 +39,28 @@ router.get("/", withInstitute(isMember), requireModule("members"), async (req, r
      LIMIT 2000`,
     args,
   );
-  res.json(rows);
+res.json(rows);
+});
+
+/** Counts for the Face ID summary box (active members with face, totals). */
+router.get("/stats", withInstitute(isMember), requireModule("members"), async (req, res) => {
+  const [faces, active] = await Promise.all([
+    one(
+      `SELECT COUNT(*) AS total, SUM(m.status = 'Active') AS active_count
+       FROM face_templates f
+       JOIN members m ON m.id = f.member_id
+       WHERE f.institute_id = ?`,
+      [req.institute.id],
+    ),
+    one("SELECT COUNT(*) AS c FROM members WHERE institute_id = ? AND status = 'Active'", [
+      req.institute.id,
+    ]),
+  ]);
+  res.json({
+    face_total: Number(faces.total || 0),
+    face_active: Number(faces.active_count || 0),
+    active_members: Number(active.c || 0),
+  });
 });
 
 /** Save (or replace) one member's face descriptor. */

@@ -4,6 +4,7 @@ import { requireAuth, withInstitute, isMember, logAudit } from "../auth.js";
 import { requireModule, requireWrite, kioskScope } from "../access.js";
 import { autoExitInstitute } from "../jobs.js";
 import { serverTimezone } from "../tz.js";
+import { studentInsights, pickInsights, DEFAULT_CATEGORIES } from "../insights.service.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -12,8 +13,12 @@ router.use(requireAuth);
 const FIELDS = [
   "institution_name", "kiosk_title", "logo_url", "welcome_message", "entry_label", "exit_label",
   "footer_note", "theme", "kiosk_template", "custom_css", "allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "result_seconds", "timezone", "multi_kiosk_transfer", "allow_face", "face_threshold", "face_model_url",
+  // “Did You Know?” student insights shown on the kiosk after a scan.
+  "insights_enabled", "insights_on_entry", "insights_on_exit", "insights_title",
+  "insights_count", "insights_categories", "insights_goal", "insights_item_html",
 ];
-const BOOLS = new Set(["allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "multi_kiosk_transfer", "allow_face"]);
+const BOOLS = new Set(["allow_palm", "allow_rfid", "allow_manual", "allow_barcode", "show_photo", "show_clock", "multi_kiosk_transfer", "allow_face", "insights_enabled", "insights_on_entry", "insights_on_exit"]);
+
 
 router.get("/kiosk", withInstitute(isMember), async (req, res) => {
   let row = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [req.institute.id]);
@@ -43,6 +48,32 @@ router.put("/kiosk", withInstitute(), requireModule("kiosks"), requireWrite, asy
   const saved = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [req.institute.id]);
   res.json({ ...saved, server_timezone: serverTimezone() });
 });
+
+/**
+ * Preview the “Did You Know?” insights of one member (membership number),
+ * so an admin can see exactly what the kiosk will show.
+ */
+router.get("/insights/preview", withInstitute(isMember), async (req, res) => {
+  const code = String(req.query.code || "").trim();
+  if (!code) return res.status(400).json({ error: "Enter a membership number" });
+  const member = await one(
+    "SELECT id, full_name, member_code FROM members WHERE institute_id = ? AND member_code = ?",
+    [req.institute.id, code],
+  );
+  if (!member) return res.status(404).json({ error: "No member with that membership number" });
+  const cfg = await one("SELECT * FROM kiosk_settings WHERE institute_id = ?", [req.institute.id]);
+  const all = await studentInsights(req.institute.id, member.id, {
+    categories: cfg?.insights_categories || DEFAULT_CATEGORIES,
+    monthly_goal: Number(cfg?.insights_goal || 0),
+  });
+  res.json({
+    member,
+    title: cfg?.insights_title || "Did You Know?",
+    shown: pickInsights(all, cfg?.insights_count ?? 2),
+    all,
+  });
+});
+
 
 /** Staff accounts attached to this university (visible to its own admins). */
 router.get("/staff", withInstitute(), async (req, res) => {
@@ -158,11 +189,28 @@ router.delete("/special-days/:day", withInstitute(), requireModule("kiosks"), re
   res.json({ ok: true });
 });
 
-/** Close open visits now, using each weekday's closing time. */
+/** Close open visits now, library-wise, and record who ran it. */
 router.post("/hours/auto-exit", withInstitute(), requireModule("kiosks"), requireWrite, async (req, res) => {
-  const closed = await autoExitInstitute(req.institute.id);
-  res.json({ closed });
+  const scope = ["all", "main", "sub"].includes(req.body?.scope) ? req.body.scope : "all";
+  const sublibraryIds = Array.isArray(req.body?.sublibrary_ids)
+    ? req.body.sublibrary_ids.map(String).slice(0, 100)
+    : [];
+  if (scope === "sub" && !sublibraryIds.length) {
+    return res.status(400).json({ error: "Pick at least one sublibrary" });
+  }
+  const closed = await autoExitInstitute(req.institute.id, {
+    scope,
+    sublibraryIds,
+    force: req.body?.force !== false,
+  });
+  await logAudit(req, req.institute.id, "settings.auto_exit_run", "entry_exit_logs", null, {
+    scope,
+    sublibrary_ids: sublibraryIds,
+    closed,
+  });
+  res.json({ closed, scope });
 });
+
 
 
 /* ---------------- PDF header / footer branding (report exports only) ---------------- */

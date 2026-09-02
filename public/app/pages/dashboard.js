@@ -89,7 +89,7 @@ function columnChart(input, { xLabel, axisEvery = 1 }) {
   </div>`;
 }
 
-export async function renderDashboard(view, { api, esc, fmtDate }) {
+export async function renderDashboard(view, { api, esc, fmtDate, toast }) {
   // Library / kiosk filter — a sublibrary user only ever sees their own terminals.
   const filters = { sublibrary_id: "", location: "", device_id: "" };
   let choices = { kiosks: [], sublibraries: [], locations: [] };
@@ -98,6 +98,22 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
   } catch {
     /* filters stay empty if the endpoint is unavailable */
   }
+
+  // Restore this login's saved filters (stored in the database, so they work
+  // on any computer the librarian signs in from).
+  try {
+    const pref = await api("/api/users/me/preferences/dashboard_filters");
+    const saved = pref?.value || {};
+    for (const k of Object.keys(filters)) {
+      if (typeof saved[k] === "string") filters[k] = saved[k];
+    }
+  } catch {
+    /* no saved preference yet */
+  }
+  // Drop saved values that no longer exist (deleted library/kiosk/location).
+  if (filters.sublibrary_id && !arr(choices.sublibraries).some((s) => s.id === filters.sublibrary_id)) filters.sublibrary_id = "";
+  if (filters.device_id && !arr(choices.kiosks).some((k) => k.device_id === filters.device_id)) filters.device_id = "";
+  if (filters.location && !arr(choices.locations).includes(filters.location)) filters.location = "";
 
   const query = () => {
     const p = new URLSearchParams();
@@ -123,6 +139,7 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
           <option value="">All kiosks</option>
           ${arr(choices.kiosks).map((k) => `<option value="${esc(k.device_id)}" ${filters.device_id === k.device_id ? "selected" : ""}>${esc(k.name)}</option>`).join("")}
         </select></label>
+      <button id="fltSave">Save preference</button>
       <button id="fltClear" class="ghost">Clear filters</button>
     </div>`;
 
@@ -134,6 +151,21 @@ export async function renderDashboard(view, { api, esc, fmtDate }) {
     wire("#fltLib", "sublibrary_id");
     wire("#fltLoc", "location");
     wire("#fltKiosk", "device_id");
+    const save = view.querySelector("#fltSave");
+    if (save) save.onclick = async () => {
+      save.disabled = true;
+      try {
+        await api("/api/users/me/preferences/dashboard_filters", {
+          method: "PUT",
+          body: { value: { ...filters } },
+        });
+        toast?.("Filter preference saved — it will load automatically on any computer you sign in from.");
+      } catch (e) {
+        toast?.(e.message || "Could not save preference", true);
+      } finally {
+        save.disabled = false;
+      }
+    };
     const clear = view.querySelector("#fltClear");
     if (clear) clear.onclick = () => {
       filters.sublibrary_id = filters.location = filters.device_id = "";

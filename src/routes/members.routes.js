@@ -178,6 +178,30 @@ router.post("/bulk", withInstitute(), requireModule("members"), requireWrite, re
   const results = [];
   let created = 0, updated = 0, skipped = 0, duplicates = 0;
 
+  // Master data codes from the sheet -> master record ids.
+  const codeMap = async (table) => {
+    const rows = await q(`SELECT id, name, code FROM ${table} WHERE institute_id = ?`, [req.institute.id]);
+    const map = new Map();
+    for (const r of rows) {
+      if (r.code) map.set("code:" + String(r.code).trim().toUpperCase().padStart(2, "0"), r.id);
+      if (r.name) map.set("name:" + String(r.name).trim().toLowerCase(), r.id);
+    }
+    return map;
+  };
+  const [courseMap, deptMap, yearMap] = await Promise.all([
+    codeMap("courses"), codeMap("departments"), codeMap("academic_years"),
+  ]);
+  /** Accept either the alphanumeric master code (01, BT, CS…) or the exact master name. */
+  const lookup = (map, value) => {
+    const raw = String(value ?? "").trim();
+    if (!raw) return null;
+    if (/^[A-Za-z0-9]{1,2}$/.test(raw)) {
+      const hit = map.get("code:" + raw.toUpperCase().padStart(2, "0"));
+      if (hit) return hit;
+    }
+    return map.get("name:" + raw.toLowerCase()) || null;
+  };
+
   // 1) Validate + normalise every row up front (no database work here).
   const prepared = [];
   const seen = new Set();
@@ -199,9 +223,10 @@ router.post("/bulk", withInstitute(), requireModule("members"), requireWrite, re
       code,
       values: {
         full_name: String(row.full_name).trim(),
-        course_id: clean(d.course_id),
-        department_id: clean(d.department_id),
-        academic_year_id: clean(d.academic_year_id),
+        course_id: lookup(courseMap, row.course_code ?? row.course) || clean(d.course_id),
+        department_id: lookup(deptMap, row.department_code ?? row.department) || clean(d.department_id),
+        academic_year_id:
+          lookup(yearMap, row.academic_year_code ?? row.academic_year) || clean(d.academic_year_id),
         gender: row.gender || d.gender || "Other",
         designation: clean(row.designation) || clean(d.designation) || "Student",
         mobile: clean(String(row.mobile ?? "").trim()),

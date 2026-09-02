@@ -74,7 +74,7 @@ export async function ensureSchemaExtras() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
 
   // Platform (owner) tables + Master Setting (sublibrary access) tables.
-  for (const file of ["platform.sql", "access.sql"]) {
+  for (const file of ["platform.sql", "access.sql", "display.sql"]) {
     const sql = await readFile(path.join(dir, "..", "db", file), "utf8");
     for (const stmt of sql.split(/;\s*\n/)) {
       // Drop comment lines so a leading comment block never hides the statement.
@@ -87,23 +87,51 @@ export async function ensureSchemaExtras() {
     }
   }
 
+  // Per-user saved preferences (dashboard filters etc.) — follows the login
+  // across computers instead of living in one browser's localStorage.
+  await pool.query(`CREATE TABLE IF NOT EXISTS user_preferences (
+    user_id CHAR(36) NOT NULL,
+    institute_id CHAR(36) NOT NULL,
+    pref_key VARCHAR(60) NOT NULL,
+    pref_value TEXT NULL,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, institute_id, pref_key)
+  )`);
 
   const extras = [
     ["kiosk_settings", "theme", "ENUM('dark','light') NOT NULL DEFAULT 'light'"],
     ["kiosk_settings", "custom_css", "TEXT NULL"],
     ["kiosk_settings", "kiosk_template", "VARCHAR(40) NOT NULL DEFAULT 'classic'"],
     ["kiosk_settings", "multi_kiosk_transfer", "TINYINT(1) NOT NULL DEFAULT 1"],
+    // “Did You Know?” student insights on the kiosk result screen.
+    ["kiosk_settings", "insights_enabled", "TINYINT(1) NOT NULL DEFAULT 1"],
+    ["kiosk_settings", "insights_on_entry", "TINYINT(1) NOT NULL DEFAULT 1"],
+    ["kiosk_settings", "insights_on_exit", "TINYINT(1) NOT NULL DEFAULT 1"],
+    ["kiosk_settings", "insights_title", "VARCHAR(120) NOT NULL DEFAULT 'Did You Know?'"],
+    ["kiosk_settings", "insights_count", "INT NOT NULL DEFAULT 2"],
+    ["kiosk_settings", "insights_categories", "VARCHAR(255) NOT NULL DEFAULT 'time,visits,streak,milestone,progress,stats,next'"],
+    ["kiosk_settings", "insights_goal", "INT NOT NULL DEFAULT 0"],
+    ["kiosk_settings", "insights_item_html", "TEXT NULL"],
+    // Idle screen: library activities / services shown when nobody is scanning.
+    ["kiosk_settings", "display_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
+    ["kiosk_settings", "display_idle_seconds", "INT NOT NULL DEFAULT 30"],
+    ["kiosk_settings", "display_slide_seconds", "INT NOT NULL DEFAULT 10"],
     ["institutes", "code", "VARCHAR(40) NULL"],
     ["institutes", "plan_id", "CHAR(36) NULL"],
     ["institutes", "status", "ENUM('Active','Suspended','Deactivated') NOT NULL DEFAULT 'Active'"],
     ["institutes", "auto_renew", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["institutes", "lead_id", "CHAR(36) NULL"],
     ["members", "import_batch_id", "CHAR(36) NULL"],
+    // Two-digit master data codes used by the bulk import mapper.
+    ["courses", "code", "CHAR(2) NULL"],
+    ["departments", "code", "CHAR(2) NULL"],
+    ["academic_years", "code", "CHAR(2) NULL"],
     ["kiosk_devices", "sublibrary_id", "CHAR(36) NULL"],
     ["bulk_import_logs", "duplicate_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "updated_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "skipped_count", "INT NOT NULL DEFAULT 0"],
   ];
+
 
   for (const [table, column, ddl] of extras) {
     const found = await one(
@@ -146,5 +174,48 @@ export async function ensureSchemaExtras() {
   await q(
     `INSERT IGNORE INTO platform_settings (setting_key, setting_value) VALUES ('grace_days', '5')`,
   );
+
+  // Two-digit codes on master data: give every existing row a code, then make
+  // the code unique inside each university so bulk import can map rows safely.
+  for (const [table, index] of [
+    ["courses", "uq_course_code"],
+    ["departments", "uq_department_code"],
+    ["academic_years", "uq_year_code"],
+  ]) {
+    const rows = await q(
+      `SELECT id, institute_id FROM \`${table}\` WHERE code IS NULL OR code = '' ORDER BY institute_id, name`,
+    );
+    const used = new Map();
+    for (const row of rows) {
+      if (!used.has(row.institute_id)) {
+        const taken = await q(
+          `SELECT code FROM \`${table}\` WHERE institute_id = ? AND code IS NOT NULL AND code <> ''`,
+          [row.institute_id],
+        );
+        used.set(row.institute_id, new Set(taken.map((t) => String(t.code))));
+      }
+      const set = used.get(row.institute_id);
+      let code = null;
+      for (let n = 1; n <= 99; n++) {
+        const candidate = String(n).padStart(2, "0");
+        if (!set.has(candidate)) { code = candidate; break; }
+      }
+      if (!code) continue;
+      set.add(code);
+      await q(`UPDATE \`${table}\` SET code = ? WHERE id = ?`, [code, row.id]);
+    }
+
+    const hasIndex = await one(
+      `SELECT 1 AS ok FROM information_schema.statistics
+       WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+      [table, index],
+    );
+    if (!hasIndex) {
+      try {
+        await pool.query(`ALTER TABLE \`${table}\` ADD UNIQUE KEY \`${index}\` (institute_id, code)`);
+      } catch { /* duplicate legacy codes — keep running without the index */ }
+    }
+  }
 }
+
 

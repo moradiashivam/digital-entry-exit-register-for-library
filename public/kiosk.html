@@ -44,6 +44,18 @@
       <p class="muted kiosk-footer" id="footer"></p>
     </section>
   </main>
+  <section id="idleShow" class="kiosk-idle" hidden aria-hidden="true">
+    <div class="kiosk-idle-inner">
+      <div class="kiosk-idle-media" id="idleMedia"></div>
+      <div class="kiosk-idle-text">
+        <p class="kiosk-idle-cat" id="idleCategory"></p>
+        <h2 id="idleTitle"></h2>
+        <p id="idleBody"></p>
+      </div>
+      <p class="kiosk-idle-hint">Touch the screen or scan your card to check in / out</p>
+      <div class="kiosk-idle-dots" id="idleDots"></div>
+    </div>
+  </section>
   <script type="module" src="/app/kiosk.js"></script>
 </body>
 </html>
