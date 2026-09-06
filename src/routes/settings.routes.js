@@ -4,6 +4,11 @@ import { requireAuth, withInstitute, isMember, logAudit } from "../auth.js";
 import { requireModule, requireWrite, kioskScope } from "../access.js";
 import { autoExitInstitute } from "../jobs.js";
 import { serverTimezone } from "../tz.js";
+import {
+  getAccessConfig, saveIpConfig, addIpRule, updateIpRule, removeIpRule,
+  validIpRule, clientIp, evaluateAccess,
+} from "../net-access.js";
+import { requireInstituteAdmin } from "../access.js";
 import { studentInsights, pickInsights, DEFAULT_CATEGORIES } from "../insights.service.js";
 
 const router = Router();
@@ -294,7 +299,8 @@ router.get("/kiosks", withInstitute(isMember), async (req, res) => {
   // Sublibrary users only ever see the terminals assigned to them.
   const scope = kioskScope(req.access, "k.device_id");
   const list = () => q(
-    `SELECT k.id, k.device_id, k.name, k.location, k.is_active, k.sublibrary_id, s.name AS sublibrary
+    `SELECT k.id, k.device_id, k.name, k.location, k.is_active, k.sublibrary_id,
+            k.display_hint_enabled, k.display_hint_text, s.name AS sublibrary
      FROM kiosk_devices k
      LEFT JOIN sublibraries s ON s.id = k.sublibrary_id
      WHERE k.institute_id = ?${scope.sql} ORDER BY k.name`,
@@ -348,8 +354,21 @@ router.patch("/kiosks/:id", withInstitute(), requireModule("kiosks"), requireWri
   const isActive = req.body?.is_active === undefined ? row.is_active : (req.body.is_active ? 1 : 0);
 
   const sublibraryId = req.body?.sublibrary_id === undefined ? row.sublibrary_id : (req.body.sublibrary_id || null);
-  await q("UPDATE kiosk_devices SET name = ?, location = ?, is_active = ?, sublibrary_id = ? WHERE id = ?",
-    [name, location, isActive, sublibraryId, row.id]);
+  // Idle-screen hint override: "inherit" (NULL), "default" (institute text),
+  // "custom" (own text) or "off" (hidden on this kiosk only).
+  let hintEnabled = row.display_hint_enabled;
+  let hintText = row.display_hint_text;
+  if (req.body?.display_hint_mode !== undefined) {
+    const mode = String(req.body.display_hint_mode);
+    if (mode === "inherit") { hintEnabled = null; hintText = null; }
+    else if (mode === "off") hintEnabled = 0;
+    else if (mode === "custom") {
+      hintEnabled = 1;
+      hintText = String(req.body?.display_hint_text ?? "").trim().slice(0, 300) || null;
+    }
+  }
+  await q("UPDATE kiosk_devices SET name = ?, location = ?, is_active = ?, sublibrary_id = ?, display_hint_enabled = ?, display_hint_text = ? WHERE id = ?",
+    [name, location, isActive, sublibraryId, hintEnabled, hintText, row.id]);
   await logAudit(req, req.institute.id, "kiosk.device_update", "kiosk_devices", row.id, { name, location, is_active: isActive });
   res.json({ id: row.id, device_id: row.device_id, name, location, is_active: isActive, sublibrary_id: sublibraryId });
 });
@@ -361,6 +380,51 @@ router.delete("/kiosks/:id", withInstitute(), requireModule("kiosks"), requireWr
   await q("DELETE FROM kiosk_devices WHERE id = ?", [row.id]);
   await logAudit(req, req.institute.id, "kiosk.device_delete", "kiosk_devices", row.id, { device_id: row.device_id });
   res.json({ ok: true });
+});
+
+/* ------------------------------------------------------------------ *
+ * University Access Control — IP address restriction (admin layer).    *
+ * The owner's geographical rule is shown read-only for reference.      *
+ * ------------------------------------------------------------------ */
+
+const ipAdmin = [withInstitute(isMember), requireInstituteAdmin];
+
+router.get("/ip-access", ...ipAdmin, async (req, res) => {
+  const access = await getAccessConfig(req.institute.id);
+  res.json({ ...access, your_ip: clientIp(req) });
+});
+
+router.put("/ip-access", ...ipAdmin, async (req, res) => {
+  const access = await saveIpConfig(req.institute.id, req.body || {});
+  const check = await evaluateAccess(req.institute.id, req);
+  await logAudit(req, req.institute.id, "access.ip_mode", "institute_access_control", req.institute.id, {
+    ip_enabled: access.ip_enabled, ip_mode: access.ip_mode,
+  });
+  res.json({ ...access, your_ip: clientIp(req), your_ip_allowed: check.allowed });
+});
+
+router.post("/ip-access/rules", ...ipAdmin, async (req, res) => {
+  const value = String(req.body?.value || "").trim();
+  if (!validIpRule(value)) {
+    return res.status(400).json({ error: "Enter a valid IP address, range (a-b), CIDR block or 203.0.113.* pattern" });
+  }
+  const id = await addIpRule(req.institute.id, value, req.body?.label);
+  await logAudit(req, req.institute.id, "access.ip_rule_add", "institute_ip_rules", id, { value });
+  res.json({ ...(await getAccessConfig(req.institute.id)), your_ip: clientIp(req) });
+});
+
+router.put("/ip-access/rules/:id", ...ipAdmin, async (req, res) => {
+  const value = String(req.body?.value || "").trim();
+  if (!validIpRule(value)) return res.status(400).json({ error: "Enter a valid IP address, range or CIDR block" });
+  await updateIpRule(req.institute.id, req.params.id, { ...req.body, value });
+  await logAudit(req, req.institute.id, "access.ip_rule_update", "institute_ip_rules", req.params.id, { value });
+  res.json({ ...(await getAccessConfig(req.institute.id)), your_ip: clientIp(req) });
+});
+
+router.delete("/ip-access/rules/:id", ...ipAdmin, async (req, res) => {
+  await removeIpRule(req.institute.id, req.params.id);
+  await logAudit(req, req.institute.id, "access.ip_rule_delete", "institute_ip_rules", req.params.id, null);
+  res.json({ ...(await getAccessConfig(req.institute.id)), your_ip: clientIp(req) });
 });
 
 export default router;

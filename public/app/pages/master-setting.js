@@ -2,7 +2,7 @@
  * Master Setting — sublibraries, sublibrary users and their permissions.
  * Only the University Administrator of the active university can open this page.
  */
-import { kiosksPanel, kioskApprovalsPanel, hoursPanel, staffPanel, backupPanel, sip2Panel, pdfBrandingPanel } from "/app/pages/admin-sections.js";
+import { kiosksPanel, kioskApprovalsPanel, hoursPanel, staffPanel, backupPanel, sip2Panel, pdfBrandingPanel, ipAccessPanel } from "/app/pages/admin-sections.js";
 
 const arr = (v) => (Array.isArray(v) ? v : []);
 
@@ -183,6 +183,7 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
       <div id="ms_hours" style="margin-top:1rem"></div>
       <div id="ms_pdf" style="margin-top:1rem"></div>
       <div id="ms_sip2" style="margin-top:1rem"></div>
+      <div id="ms_ipaccess" style="margin-top:1rem"></div>
       <div id="ms_staff" style="margin-top:1rem"></div>
       <div id="ms_backup" style="margin-top:1rem"></div>`;
 
@@ -194,6 +195,7 @@ export async function renderMasterSetting(view, { api, esc, toast }) {
     hoursPanel(view.querySelector("#ms_hours"), ctx);
     pdfBrandingPanel(view.querySelector("#ms_pdf"), ctx);
     sip2Panel(view.querySelector("#ms_sip2"), ctx);
+    ipAccessPanel(view.querySelector("#ms_ipaccess"), ctx);
     staffPanel(view.querySelector("#ms_staff"), ctx);
     backupPanel(view.querySelector("#ms_backup"), ctx);
   };

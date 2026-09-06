@@ -285,7 +285,15 @@ export async function renderReports(view, { api, esc, fmtDate, downloadCsv, toas
     </div>
 
     <div class="panel" id="failedPanel" style="margin-top:1rem">
-      <h3>Failed scans</h3>
+      <div class="row" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.6rem">
+        <h3 style="margin:0">Failed scans</h3>
+        <div class="row" style="gap:.4rem;align-items:center">
+          <input id="failedSearch" placeholder="Search failed scans" style="width:200px" />
+          <button id="failedSearchBtn">Search</button>
+          <button class="ghost" id="failedMore">Show more (50)</button>
+        </div>
+      </div>
+      <p class="muted" id="failedCount" style="margin:.4rem 0"></p>
       <table><thead><tr><th>Time</th><th>Attempted</th><th>Reason</th><th>Method</th><th>Device</th></tr></thead>
       <tbody id="failed"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
     </div>`;
@@ -303,6 +311,8 @@ const $ = (s) => view.querySelector(s) || {};
     $("#failedPanel").style.display = "none";
     $("#exportBar").style.display = "none";
     $("#reportHint").style.display = "none";
+    const sk = view.querySelector("#sankeyHost");
+    if (sk) sk.style.display = "";
     if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
   };
   const showStandardView = () => {
@@ -312,6 +322,8 @@ const $ = (s) => view.querySelector(s) || {};
     $("#failedPanel").style.display = "";
     $("#exportBar").style.display = "";
     $("#reportHint").style.display = "";
+    const sk = view.querySelector("#sankeyHost");
+    if (sk) sk.style.display = "none";
     applyLayout();
   };
   const cfg = () => REPORTS[reportKey];
@@ -514,7 +526,7 @@ const $ = (s) => view.querySelector(s) || {};
 $("#reportType").onchange = (e) => {
     if (e.target.value === "__sankey") {
       // Sankey is a graph, not a table report: show only the graph panel.
-      e.target.value = reportKey;
+      // Keep "__sankey" selected so the dropdown matches what is on screen.
       showSankeyOnly();
       view.querySelector("#sankeyPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
@@ -632,16 +644,36 @@ $("#reportType").onchange = (e) => {
     doc.open(); doc.write(html); doc.close();
   };
 
-  const failed = (await api("/api/reports/failed").catch(() => [])) || [];
-  $("#failed").innerHTML = failed.length
-    ? failed.map((f) => `<tr><td>${fmtDate(f.occurred_at)}</td><td>${esc(f.attempted_code || "—")}</td>
-        <td>${esc(f.reason)}</td><td>${esc(f.method)}</td><td>${esc(f.device_id)}</td></tr>`).join("")
-    : `<tr><td colspan="5" class="muted">No failed scans recorded.</td></tr>`;
+  // Failed scans: load the most recent 50 only (fast), with search and "show more".
+  let failedLimit = 50;
+  const loadFailed = async () => {
+    const params = new URLSearchParams({ limit: failedLimit });
+    const term = ($("#failedSearch")?.value || "").trim();
+    if (term) params.set("search", term);
+    const data = (await api(`/api/reports/failed?${params}`).catch(() => ({ rows: [], total: 0 }))) || { rows: [], total: 0 };
+    const list = data.rows || [];
+    const total = Number(data.total || 0);
+    if ($("#failedCount")) $("#failedCount").textContent = `Showing ${list.length} of ${total} failed scan(s).`;
+    $("#failed").innerHTML = list.length
+      ? list.map((f) => `<tr><td>${fmtDate(f.occurred_at)}</td><td>${esc(f.attempted_code || "—")}</td>
+          <td>${esc(f.reason)}</td><td>${esc(f.method)}</td><td>${esc(f.device_id)}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="muted">No failed scans found.</td></tr>`;
+  };
+  if ($("#failedSearchBtn")) $("#failedSearchBtn").onclick = () => { failedLimit = 50; loadFailed().catch((e) => toast(e.message, true)); };
+  if ($("#failedSearch")) {
+    $("#failedSearch").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { failedLimit = 50; loadFailed().catch((err) => toast(err.message, true)); }
+    });
+  }
+  if ($("#failedMore")) $("#failedMore").onclick = () => { failedLimit = Math.min(500, failedLimit + 50); loadFailed().catch((e) => toast(e.message, true)); };
+  await loadFailed();
 
   await switchReport(reportKey);
 
   // Student visit analysis (Course → Department → Time period) — own filters.
   const sankeyHost = document.createElement("div");
+  sankeyHost.id = "sankeyHost";
+  sankeyHost.style.display = "none"; // hidden until "9 · Visit analysis (Sankey)" is selected
   view.appendChild(sankeyHost);
   import("/app/pages/sankey.js")
     .then((m) => m.mountSankey(sankeyHost, { api, esc, toast }, masters))

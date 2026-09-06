@@ -5,6 +5,9 @@
  * 128-number descriptor is stored; face images never leave the page.
  */
 import * as fr from "/app/face-engine.js";
+import { attachFaceScan } from "/app/face-scan-fx.js";
+
+let faceFx = null;
 
 let current = null;
 let camStream = null;
@@ -55,7 +58,9 @@ view.innerHTML = `
         <button id="camCapture" disabled>Capture &amp; enrol</button>
         <button class="ghost" id="camStop" disabled>Stop camera</button>
       </div>
-      <video id="camVideo" playsinline muted style="margin-top:.7rem;max-width:340px;width:100%;border-radius:10px;background:#000"></video>
+      <div id="camWrap" style="margin-top:.7rem;max-width:340px;width:100%;border-radius:10px;overflow:hidden;position:relative;background:#000">
+        <video id="camVideo" playsinline muted style="width:100%;display:block;border-radius:10px"></video>
+      </div>
       <p class="muted" id="camHint"></p>
     </div>`;
 
@@ -159,18 +164,30 @@ async function save(found, source) {
     await el("camVideo").play().catch(() => {});
     el("camCapture").disabled = false;
     el("camStop").disabled = false;
+    if (!faceFx) faceFx = attachFaceScan(el("camWrap"));
+    faceFx.scanning("Camera ready — scanning face…");
     camHint("Camera ready — look straight ahead and press Capture.");
   };
 
   el("camCapture").onclick = async () => {
     if (!current) return camHint("Load a member by membership number first.");
     camHint("Reading the face…");
+    faceFx?.verifying("Detecting face…");
     try {
       const found = await fr.describeFace(el("camVideo"), settings.face_model_url);
-      if (!found) return camHint("No face detected — move closer to the camera.");
+      if (!found) {
+        faceFx?.fail("No face detected — move closer");
+        return camHint("No face detected — move closer to the camera.");
+      }
+      faceFx?.detected("Face detected");
+      faceFx?.verifying("Enrolling face…");
       await save(found, "camera");
+      faceFx?.success(`Face enrolled for ${current.full_name}`);
       camHint("Face enrolled from the live photo.");
-    } catch (err) { camHint(err.message || "Could not enrol this face."); }
+    } catch (err) {
+      faceFx?.fail("Could not enrol this face");
+      camHint(err.message || "Could not enrol this face.");
+    }
   };
 
   el("camStop").onclick = () => {
@@ -179,6 +196,7 @@ async function save(found, source) {
     el("camVideo").srcObject = null;
     el("camCapture").disabled = true;
     el("camStop").disabled = true;
+    faceFx?.idle();
     camHint("Camera stopped.");
   };
 

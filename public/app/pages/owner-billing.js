@@ -1,5 +1,9 @@
+import { openInvoiceDialog } from "/app/pages/owner-invoice.js";
+import { mountEstimates } from "/app/pages/owner-estimates.js";
+
 const money = (v) => `₹${Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const arr = (v) => (Array.isArray(v) ? v : []);
+
 
 export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downloadCsv }) {
   const filters = { institute_id: "", status: "", mode: "", from: "", to: "" };
@@ -12,7 +16,7 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
       <form id="newPay" class="row">
         <div style="min-width:200px"><label for="n_inst">University</label><select id="n_inst" required></select></div>
         <div><label for="n_amount">Amount (₹)</label><input id="n_amount" type="number" min="0" step="0.01" required /></div>
-        <div><label for="n_tax">Tax / GST (₹)</label><input id="n_tax" type="number" min="0" step="0.01" value="0" /></div>
+        <div><label for="n_tax">Manual tax (₹)</label><input id="n_tax" type="number" min="0" step="0.01" value="0" /></div>
         <div><label for="n_mode">Mode</label><select id="n_mode">
           <option>Online</option><option>Bank Transfer</option><option>Cheque</option><option>Cash</option><option>UPI</option>
         </select></div>
@@ -24,7 +28,9 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
           <input id="n_desc" style="width:100%" placeholder="Yearly subscription 2026-27" /></div>
         <div><label>&nbsp;</label><button type="submit">Save payment</button></div>
       </form>
-      <p class="muted">Invoice numbers are generated automatically. Payments are never deleted — void them instead.</p>
+      <div id="gstBox" style="margin-top:.6rem"></div>
+      <p class="muted">Invoice numbers are generated automatically. Payments are never deleted — void them instead.
+        GST percentages come from System settings; tick a tax to apply it, or leave all unticked to use the manual amount.</p>
     </div>
 
     <div class="panel" style="margin-top:1rem">
@@ -45,6 +51,8 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
         <tbody id="payRows"><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
       </table></div>
     </div>
+
+    <div class="panel" id="estBox" style="margin-top:1rem"><p class="muted">Loading estimates…</p></div>
 
     <div class="grid cols-2" style="margin-top:1rem">
       <div class="panel"><h3 style="margin-top:0">Monthly accounting</h3><div id="periods"></div></div>
@@ -71,6 +79,8 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
           <td>${esc(p.payment_mode)}</td><td>${badge(p.status)}</td>
           <td class="muted">${esc(fmtDate(p.paid_at || p.created_at))}</td>
           <td class="row" style="gap:.3rem">
+            <button class="ghost" data-invoice="${esc(p.id)}">Invoice</button>
+            <button class="ghost" data-upi="${esc(p.id)}">UPI QR</button>
             ${p.status === "Void" ? "" : `<select data-status="${esc(p.id)}">
               ${["Pending", "Success", "Failed", "Refunded"].map((s) =>
                 `<option ${s === p.status ? "selected" : ""}>${s}</option>`).join("")}</select>
@@ -78,6 +88,7 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
           </td></tr>`).join("")
       : `<tr><td colspan="10" class="muted">No payments match these filters.</td></tr>`;
   };
+
 
   const loadAccounting = async () => {
     const d = (await api("/api/owner/accounting/summary?group=month")) || {};
@@ -118,8 +129,13 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
   });
 
   view.querySelector("#payRows").addEventListener("click", async (e) => {
+    const invoiceId = e.target.dataset.invoice;
+    if (invoiceId) return openInvoiceDialog(invoiceId, { api, toast });
+    const upiId = e.target.dataset.upi;
+    if (upiId) return showUpiQr(upiId);
     const id = e.target.dataset.void;
     if (!id) return;
+
     const reason = prompt("Why is this invoice being voided?");
     if (!reason) return;
     try {
@@ -155,6 +171,7 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
         method: "POST",
         body: {
           institute_id: val("#n_inst"), amount: Number(val("#n_amount")), tax_amount: Number(val("#n_tax")),
+          taxes: chosenTaxes(),
           payment_mode: val("#n_mode"), status: val("#n_status"), due_date: val("#n_due") || null,
           gateway_txn_id: val("#n_txn") || null, description: val("#n_desc") || null,
         },
@@ -167,11 +184,73 @@ export async function renderOwnerBilling(view, { api, esc, toast, fmtDate, downl
     }
   };
 
+    /* Shows the UPI payment QR for one invoice. */
+  async function showUpiQr(id) {
+    const row = rows.find((r) => r.id === id) || {};
+    let data;
+    try {
+      data = await api(`/api/owner/payments/${id}/upi-qr`);
+    } catch (err) {
+      return toast(err.message, true);
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "modal-back";
+    wrap.innerHTML = `
+      <div class="panel modal-card" style="text-align:center">
+        <h3 style="margin-top:0">Pay ${money(row.total_amount)} by UPI</h3>
+        <img src="${esc(data.image)}" alt="UPI QR code" style="width:260px;max-width:100%" />
+        <p><strong>${esc(data.upi_id)}</strong></p>
+        <p class="muted">Reference: ${esc(row.invoice_no || "")}</p>
+        <div class="row" style="justify-content:center">
+          <a class="ghost" style="text-decoration:none" href="${esc(data.link)}">Open in UPI app</a>
+          <button class="ghost" id="q_close">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.querySelector("#q_close").onclick = close;
+    wrap.addEventListener("click", (ev) => ev.target === wrap && close());
+  }
+
+  /* GST — percentages are read from the platform settings, never typed here. */
+  const gstBox = view.querySelector("#gstBox");
+  const chosenTaxes = () =>
+    [...gstBox.querySelectorAll("input[data-tax]:checked")].map((c) => c.dataset.tax);
+
+  const drawGstTotals = () => {
+    const net = Number(view.querySelector("#n_amount").value || 0);
+    const picked = taxRates.filter((t) => chosenTaxes().includes(t.code));
+    const tax = picked.length
+      ? picked.reduce((s, t) => s + (net * t.percent) / 100, 0)
+      : Number(view.querySelector("#n_tax").value || 0);
+    const detail = picked.map((t) => `${esc(t.name)} ${t.percent}% = ${money((net * t.percent) / 100)}`).join(" · ");
+    gstBox.querySelector("#gstSum").innerHTML =
+      `${detail ? `${detail} · ` : ""}Tax ${money(tax)} · <strong>Total ${money(net + tax)}</strong>`;
+  };
+
+  const taxRates = arr(((await api("/api/owner/tax-rates")) || {}).taxes).filter((t) => t.active);
+  gstBox.innerHTML = taxRates.length
+    ? `<div class="row" style="align-items:center">
+         ${taxRates.map((t) => `<label class="chk"><input type="checkbox" data-tax="${esc(t.code)}" />
+           ${esc(t.name)} (${t.percent}%)</label>`).join("")}
+         <span class="muted" id="gstSum"></span>
+       </div>`
+    : `<p class="muted">No GST rate is active. Turn SGST, CGST or IGST on in System settings to apply them here.</p>`;
+  if (taxRates.length) {
+    gstBox.addEventListener("change", drawGstTotals);
+    view.querySelector("#n_amount").addEventListener("input", drawGstTotals);
+    view.querySelector("#n_tax").addEventListener("input", drawGstTotals);
+    drawGstTotals();
+  }
+
   const list = (await api("/api/owner/tenants?size=500")) || {};
   institutes = arr(list.rows);
   const opts = institutes.map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("");
   view.querySelector("#n_inst").innerHTML = `<option value="">Choose…</option>${opts}`;
   view.querySelector("#f_inst").innerHTML = `<option value="">All universities</option>${opts}`;
+
+  await mountEstimates(view.querySelector("#estBox"), { api, esc, toast, fmtDate },
+    { institutes, taxRates, onConverted: () => Promise.all([loadPayments(), loadAccounting()]) });
 
   await Promise.all([loadPayments(), loadAccounting()]);
 }

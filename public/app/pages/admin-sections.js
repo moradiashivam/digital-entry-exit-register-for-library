@@ -30,12 +30,26 @@ export function kiosksPanel(box, { api, esc, toast }) {
 
   const paintKiosks = (list) => {
     kiosksBox.classList.remove("muted");
+    const hintMode = (k) =>
+      k.display_hint_enabled === null || k.display_hint_enabled === undefined
+        ? "inherit"
+        : (Number(k.display_hint_enabled) === 1 ? "custom" : "off");
     kiosksBox.innerHTML = list.length
-      ? `<table><thead><tr><th>Name</th><th>Location</th><th>Kiosk link</th><th>Active</th><th></th></tr></thead>
+      ? `<table><thead><tr><th>Name</th><th>Location</th><th>Kiosk link</th><th>Idle message</th><th>Active</th><th></th></tr></thead>
         <tbody>${list.map((k) => `<tr data-id="${esc(k.id)}">
           <td><input class="k-name" value="${esc(k.name)}" /></td>
           <td><input class="k-loc" value="${esc(k.location ?? "")}" placeholder="e.g. Main gate" /></td>
           <td><a href="${esc(kioskLink(k.device_id))}" target="_blank">${esc(kioskLink(k.device_id))}</a></td>
+          <td>
+            <select class="k-hint-mode" style="width:auto">
+              <option value="inherit" ${hintMode(k) === "inherit" ? "selected" : ""}>Same as default</option>
+              <option value="custom" ${hintMode(k) === "custom" ? "selected" : ""}>Custom message</option>
+              <option value="off" ${hintMode(k) === "off" ? "selected" : ""}>Hidden</option>
+            </select>
+            <input class="k-hint-text" maxlength="300" style="width:100%;margin-top:.3rem"
+              placeholder="Custom message for this kiosk"
+              value="${esc(k.display_hint_text ?? "")}" ${hintMode(k) === "custom" ? "" : "hidden"} />
+          </td>
           <td style="text-align:center"><input type="checkbox" class="k-active" ${k.is_active ? "checked" : ""} /></td>
           <td class="row" style="gap:.35rem">
             <button class="k-save">Save</button>
@@ -45,6 +59,9 @@ export function kiosksPanel(box, { api, esc, toast }) {
 
     for (const tr of kiosksBox.querySelectorAll("tbody tr")) {
       const id = tr.dataset.id;
+      const modeSel = tr.querySelector(".k-hint-mode");
+      const textInp = tr.querySelector(".k-hint-text");
+      modeSel.onchange = () => { textInp.hidden = modeSel.value !== "custom"; };
       tr.querySelector(".k-save").onclick = async () => {
         try {
           await api(`/api/settings/kiosks/${id}`, {
@@ -53,6 +70,8 @@ export function kiosksPanel(box, { api, esc, toast }) {
               name: tr.querySelector(".k-name").value,
               location: tr.querySelector(".k-loc").value,
               is_active: tr.querySelector(".k-active").checked,
+              display_hint_mode: modeSel.value,
+              display_hint_text: textInp.value,
             },
           });
           toast("Kiosk saved");
@@ -837,4 +856,110 @@ export function kioskApprovalsPanel(box, { api, esc, toast }) {
   };
 
   load();
+}
+
+/* ---------------- Access control — permitted IP addresses ---------------- */
+
+export function ipAccessPanel(box, { api, esc, toast }) {
+  box.innerHTML = `
+    <div class="panel">
+      <h3>Access control — permitted IP addresses</h3>
+      <p class="muted">Allow staff to sign in from anywhere, or only from the internet
+        connections you list here. Single addresses, ranges (<code>203.0.113.1-203.0.113.50</code>),
+        blocks (<code>203.0.113.0/24</code>) and patterns (<code>203.0.113.*</code>) are all accepted.</p>
+      <div id="ipaBody" class="muted">Loading…</div>
+    </div>`;
+  const body = box.querySelector("#ipaBody");
+
+  const paint = (d) => {
+    const rules = d.rules || [];
+    body.innerHTML = `
+      <div class="row" style="align-items:center;flex-wrap:wrap;gap:.6rem">
+        <label><input type="radio" name="ipMode" value="all" ${d.ip_mode === "selected" && d.ip_enabled ? "" : "checked"}/> Allow all IP addresses</label>
+        <label><input type="radio" name="ipMode" value="selected" ${d.ip_mode === "selected" && d.ip_enabled ? "checked" : ""}/> Only the addresses listed below</label>
+        <button id="ipaSave">Save access mode</button>
+      </div>
+      <p class="muted" style="margin:.5rem 0">This computer is using <b>${esc(d.your_ip || "unknown")}</b>${
+        d.geo_enabled ? " · A location rule set by the platform owner also applies to this university." : ""
+      }</p>
+      <table class="table"><thead><tr><th>Address / range</th><th>Label</th><th>Active</th><th></th></tr></thead>
+        <tbody>${
+          rules.length
+            ? rules
+                .map(
+                  (r) => `<tr data-id="${r.id}">
+              <td><input class="ipa-val" value="${esc(r.value)}" /></td>
+              <td><input class="ipa-lab" value="${esc(r.label || "")}" placeholder="e.g. Campus wifi" /></td>
+              <td style="text-align:center"><input type="checkbox" class="ipa-act" ${Number(r.active) ? "checked" : ""}/></td>
+              <td class="row"><button class="ipa-upd">Save</button><button class="ipa-del danger">Remove</button></td></tr>`,
+                )
+                .join("")
+            : `<tr><td colspan="4" class="muted">No addresses added yet.</td></tr>`
+        }</tbody></table>
+      <div class="row" style="margin-top:.8rem;align-items:center;flex-wrap:wrap">
+        <input id="ipaNew" placeholder="203.0.113.25 or 203.0.113.0/24" />
+        <input id="ipaNewLabel" placeholder="Label (optional)" />
+        <button id="ipaAdd">Add address</button>
+        <button id="ipaMine" class="ghost">Use this computer's address</button>
+      </div>`;
+
+    body.querySelector("#ipaSave").onclick = async () => {
+      const mode = body.querySelector('input[name="ipMode"]:checked').value;
+      try {
+        const out = await api("/api/settings/ip-access", {
+          method: "PUT",
+          body: { ip_enabled: mode === "selected", ip_mode: mode },
+        });
+        if (mode === "selected" && out.your_ip_allowed === false) {
+          toast("Saved, but this computer's address is not in the list — add it before signing out.");
+        } else toast("Access mode saved");
+        paint(out);
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+    body.querySelector("#ipaMine").onclick = () => {
+      body.querySelector("#ipaNew").value = d.your_ip || "";
+    };
+    body.querySelector("#ipaAdd").onclick = async () => {
+      const value = body.querySelector("#ipaNew").value.trim();
+      if (!value) return;
+      try {
+        paint(await api("/api/settings/ip-access/rules", {
+          method: "POST",
+          body: { value, label: body.querySelector("#ipaNewLabel").value.trim() },
+        }));
+        toast("Address added");
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+    body.querySelectorAll("tr[data-id]").forEach((tr) => {
+      const id = tr.dataset.id;
+      tr.querySelector(".ipa-upd").onclick = async () => {
+        try {
+          paint(await api(`/api/settings/ip-access/rules/${id}`, {
+            method: "PUT",
+            body: {
+              value: tr.querySelector(".ipa-val").value.trim(),
+              label: tr.querySelector(".ipa-lab").value.trim(),
+              active: tr.querySelector(".ipa-act").checked,
+            },
+          }));
+          toast("Saved");
+        } catch (e) {
+          toast(e.message);
+        }
+      };
+      tr.querySelector(".ipa-del").onclick = async () => {
+        if (!confirm("Remove this address?")) return;
+        paint(await api(`/api/settings/ip-access/rules/${id}`, { method: "DELETE" }));
+        toast("Removed");
+      };
+    });
+  };
+
+  api("/api/settings/ip-access")
+    .then(paint)
+    .catch((e) => (body.textContent = e.message));
 }

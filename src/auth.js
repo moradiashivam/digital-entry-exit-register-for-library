@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { q, one, uuid } from "./db.js";
 import { loadAccess, accessFor, WRITE_ROLES } from "./access.js";
+import { evaluateAccess, DENY_MESSAGE } from "./net-access.js";
 
 
 const SECRET = process.env.JWT_SECRET || "dev-only-secret-change-me";
@@ -93,6 +94,13 @@ export function withInstitute(check = isStaff) {
     const inst = await one("SELECT * FROM institutes WHERE id = ?", [id]);
     if (!inst) return res.status(404).json({ error: "University not found" });
     if (!check(req.user, inst.id)) return res.status(403).json({ error: "Not allowed for this university" });
+    // University Access Control: geography (owner) then IP list (university).
+    if (!req.user?.is_platform_owner) {
+      const verdict = await evaluateAccess(inst.id, req);
+      if (!verdict.allowed) {
+        return res.status(403).json({ error: DENY_MESSAGE, detail: verdict.reason, access_blocked: verdict.layer });
+      }
+    }
     req.institute = inst;
     req.access = accessFor(req.user, inst.id);
     next();

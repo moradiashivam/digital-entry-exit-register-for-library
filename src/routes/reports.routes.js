@@ -227,10 +227,23 @@ router.get("/logs", withInstitute(canViewReports), requireModule("entry_exit"), 
 });
 
 router.get("/failed", withInstitute(isStaff), async (req, res) => {
-  res.json(await q(
-    `SELECT * FROM failed_scan_logs WHERE institute_id = ? ORDER BY occurred_at DESC LIMIT 500`,
-    [req.institute.id],
-  ));
+  // Show only the most recent 50 by default so the Reports page loads fast;
+  // the admin can search or request more via query params.
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 50));
+  const search = (req.query.search || "").trim().slice(0, 80);
+  const params = [req.institute.id];
+  let sql = `SELECT * FROM failed_scan_logs WHERE institute_id = ?`;
+  if (search) {
+    sql += ` AND (attempted_code LIKE ? OR reason LIKE ? OR device_id LIKE ?)`;
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+  }
+  sql += ` ORDER BY occurred_at DESC LIMIT ${limit}`;
+  const rows = await q(sql, params);
+  const totalRow = await q(
+    `SELECT COUNT(*) AS n FROM failed_scan_logs WHERE institute_id = ?${search ? ` AND (attempted_code LIKE ? OR reason LIKE ? OR device_id LIKE ?)` : ""}`,
+    search ? [req.institute.id, `%${search}%`, `%${search}%`, `%${search}%`] : [req.institute.id],
+  );
+  res.json({ rows, total: Number(totalRow[0]?.n || 0), limit });
 });
 
 router.get("/audit", withInstitute(isStaff), requireModule("audit"), async (req, res) => {

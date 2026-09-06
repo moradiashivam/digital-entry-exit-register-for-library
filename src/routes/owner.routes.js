@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { q, one, uuid, today } from "../db.js";
 import { requireAuth, requireOwner, logAudit } from "../auth.js";
+import QRCode from "qrcode";
 import { encrypt } from "../crypto.js";
 import { sendMailWith } from "../mailer.js";
 import { runExpiryJob } from "../jobs.js";
+import { getAccessConfig, saveGeoConfig } from "../net-access.js";
 import { SEO_KEYS, SEO_PAGES, getSeoSettings, baseUrl, robotsTxt, sitemapXml, seoAudit, pageMeta } from "../seo.js";
 
 const router = Router();
@@ -11,6 +13,52 @@ router.use(requireAuth, requireOwner);
 
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 const nullable = (v) => (v === undefined || v === "" ? null : v);
+
+/* ------------------------------------------------------------------ *
+ * GST tax rates — one platform-level source of truth (#platform).     *
+ * ------------------------------------------------------------------ */
+const DEFAULT_TAXES = [
+  { code: "SGST", name: "SGST", percent: 9, active: true },
+  { code: "CGST", name: "CGST", percent: 9, active: true },
+  { code: "IGST", name: "IGST", percent: 18, active: false },
+];
+
+const cleanTaxes = (input) => {
+  const list = Array.isArray(input) ? input : [];
+  return DEFAULT_TAXES.map((d) => {
+    const found = list.find((t) => String(t?.code || "").toUpperCase() === d.code) || {};
+    const percent = Math.min(100, Math.max(0, num(found.percent, d.percent)));
+    return {
+      code: d.code,
+      name: String(found.name || d.name).slice(0, 40),
+      percent: Math.round(percent * 100) / 100,
+      active: found.active === undefined ? d.active : !!found.active,
+    };
+  });
+};
+
+/** Reads the saved GST configuration, always returning all three tax types. */
+export const getTaxRates = async () => {
+  const row = await one("SELECT setting_value FROM platform_settings WHERE setting_key = 'gst_taxes'");
+  let parsed = [];
+  try { parsed = JSON.parse(row?.setting_value || "[]"); } catch { parsed = []; }
+  return cleanTaxes(parsed);
+};
+
+router.get("/tax-rates", async (_req, res) => {
+  res.json({ taxes: await getTaxRates() });
+});
+
+router.put("/tax-rates", async (req, res) => {
+  const taxes = cleanTaxes(req.body?.taxes);
+  await q(
+    `INSERT INTO platform_settings (setting_key, setting_value) VALUES ('gst_taxes', ?)
+     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    [JSON.stringify(taxes)],
+  );
+  await logAudit(req, null, "platform.tax_rates", "platform_settings", null, { taxes });
+  res.json({ taxes });
+});
 
 /* ------------------------------------------------------------------ *
  * 1. Owner dashboard — platform level aggregates only.                *
@@ -213,6 +261,27 @@ router.get("/tenants/:id", async (req, res) => {
   });
 });
 
+/* --------------- University Access Control (geography layer) --------------- */
+
+router.get("/tenants/:id/access", async (req, res) => {
+  const tenant = await one("SELECT id, name FROM institutes WHERE id = ?", [req.params.id]);
+  if (!tenant) return res.status(404).json({ error: "University not found" });
+  res.json({ tenant, access: await getAccessConfig(tenant.id) });
+});
+
+router.put("/tenants/:id/access", async (req, res) => {
+  const tenant = await one("SELECT id, name FROM institutes WHERE id = ?", [req.params.id]);
+  if (!tenant) return res.status(404).json({ error: "University not found" });
+  const access = await saveGeoConfig(tenant.id, req.body || {});
+  await logAudit(req, tenant.id, "institute.geo_access", "institute_access_control", tenant.id, {
+    geo_enabled: access.geo_enabled,
+    countries: access.geo_countries,
+    states: access.geo_states,
+    cities: access.geo_cities,
+  });
+  res.json({ access });
+});
+
 router.patch("/tenants/:id/status", async (req, res) => {
   const status = req.body?.status;
   if (!["Active", "Suspended", "Deactivated"].includes(status)) {
@@ -306,20 +375,31 @@ router.post("/payments", async (req, res) => {
   const institute = await one("SELECT id, name FROM institutes WHERE id = ?", [req.body?.institute_id]);
   if (!institute) return res.status(400).json({ error: "Choose a university" });
   const amount = num(req.body?.amount);
-  const tax = num(req.body?.tax_amount);
   if (amount <= 0) return res.status(400).json({ error: "Amount must be greater than zero" });
+
+  // GST: the rates always come from the platform configuration, never from the browser.
+  const chosen = (Array.isArray(req.body?.taxes) ? req.body.taxes : [])
+    .map((c) => String(c || "").toUpperCase());
+  const rates = await getTaxRates();
+  const breakup = rates
+    .filter((t) => t.active && chosen.includes(t.code))
+    .map((t) => ({ ...t, amount: Math.round(amount * t.percent) / 100 }));
+  const tax = breakup.length
+    ? Math.round(breakup.reduce((s, t) => s + t.amount, 0) * 100) / 100
+    : num(req.body?.tax_amount);
+
   const status = ["Pending", "Success", "Failed", "Refunded"].includes(req.body?.status) ? req.body.status : "Success";
   const id = uuid();
   const invoiceNo = String(req.body?.invoice_no || "").trim() || (await nextInvoiceNo());
   await q(
     `INSERT INTO payments (id, institute_id, invoice_no, description, amount, tax_amount, total_amount,
-       payment_mode, gateway_txn_id, status, due_date, paid_at, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       payment_mode, gateway_txn_id, status, due_date, paid_at, created_by, tax_breakup)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [id, institute.id, invoiceNo, nullable(req.body?.description), amount, tax, amount + tax,
      ["Online", "Bank Transfer", "Cheque", "Cash", "UPI"].includes(req.body?.payment_mode) ? req.body.payment_mode : "Online",
      nullable(req.body?.gateway_txn_id), status, nullable(req.body?.due_date),
      status === "Success" ? (req.body?.paid_at || new Date().toISOString().slice(0, 19).replace("T", " ")) : null,
-     req.user.email],
+     req.user.email, breakup.length ? JSON.stringify(breakup) : null],
   );
   await logAudit(req, institute.id, "payment.create", "payments", id, { invoiceNo, amount: amount + tax, status });
   res.status(201).json(await one("SELECT * FROM payments WHERE id = ?", [id]));
@@ -352,6 +432,188 @@ router.post("/payments/:id/void", async (req, res) => {
   await logAudit(req, pay.institute_id, "payment.void", "payments", pay.id, { reason: req.body?.reason });
   res.json({ ok: true });
 });
+
+/** Everything the invoice generator needs for one payment: buyer, seller and document text. */
+router.get("/payments/:id/invoice", async (req, res) => {
+  const pay = await one(
+    `SELECT pay.*, i.name AS institute, i.contact_email, i.contact_phone, i.address AS institute_address
+     FROM payments pay JOIN institutes i ON i.id = pay.institute_id WHERE pay.id = ?`,
+    [req.params.id],
+  );
+  if (!pay) return res.status(404).json({ error: "Payment not found" });
+  const rows = await q("SELECT setting_key, setting_value FROM platform_settings");
+  const settings = Object.fromEntries(rows.map((r) => [r.setting_key, r.setting_value]));
+  let taxBreakup = [];
+  try { taxBreakup = JSON.parse(pay.tax_breakup || "[]"); } catch { taxBreakup = []; }
+  res.json({
+    payment: { ...pay, tax_breakup: taxBreakup },
+    settings,
+    taxes: await getTaxRates(),
+    upi: await upiQr(settings, pay.total_amount, pay.invoice_no),
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * 4b. UPI QR code — the UPI id lives in System settings only.         *
+ * ------------------------------------------------------------------ */
+const upiQr = async (settings, amount, note) => {
+  const pa = String(settings.upi_id || "").trim();
+  if (!/^[\w.\-]{2,64}@[A-Za-z]{2,32}$/.test(pa)) return null;
+  const params = new URLSearchParams({
+    pa,
+    pn: String(settings.upi_payee_name || settings.company_name || "Payee").slice(0, 60),
+    am: Number(amount || 0).toFixed(2),
+    cu: settings.currency && settings.currency.length === 3 ? settings.currency : "INR",
+    tn: String(note || "").slice(0, 50),
+  });
+  const link = `upi://pay?${params.toString()}`;
+  return { link, upi_id: pa, image: await QRCode.toDataURL(link, { margin: 1, width: 320 }) };
+};
+
+router.get("/payments/:id/upi-qr", async (req, res) => {
+  const pay = await one("SELECT invoice_no, total_amount FROM payments WHERE id = ?", [req.params.id]);
+  if (!pay) return res.status(404).json({ error: "Payment not found" });
+  const rows = await q("SELECT setting_key, setting_value FROM platform_settings");
+  const settings = Object.fromEntries(rows.map((r) => [r.setting_key, r.setting_value]));
+  const upi = await upiQr(settings, pay.total_amount, pay.invoice_no);
+  if (!upi) return res.status(400).json({ error: "Add a valid UPI ID in System settings first" });
+  res.json(upi);
+});
+
+/* ------------------------------------------------------------------ *
+ * 4c. Estimates — editable quotations, convertible into an invoice.   *
+ * ------------------------------------------------------------------ */
+const nextEstimateNo = async () => {
+  const year = new Date().getFullYear();
+  const [{ n }] = await q(
+    "SELECT COUNT(*) + 1 AS n FROM estimates WHERE estimate_no LIKE ?",
+    [`EST-${year}-%`],
+  );
+  return `EST-${year}-${String(n).padStart(4, "0")}`;
+};
+
+/** Amounts and GST are always recalculated on the server from saved rates. */
+const estimateTotals = async (body) => {
+  const amount = num(body?.amount);
+  const chosen = (Array.isArray(body?.taxes) ? body.taxes : []).map((c) => String(c || "").toUpperCase());
+  const rates = await getTaxRates();
+  const breakup = rates
+    .filter((t) => t.active && chosen.includes(t.code))
+    .map((t) => ({ ...t, amount: Math.round(amount * t.percent) / 100 }));
+  const tax = breakup.length
+    ? Math.round(breakup.reduce((s, t) => s + t.amount, 0) * 100) / 100
+    : num(body?.tax_amount);
+  return { amount, tax, breakup, total: Math.round((amount + tax) * 100) / 100 };
+};
+
+const parseBreakup = (row) => {
+  try { return { ...row, tax_breakup: JSON.parse(row.tax_breakup || "[]") }; }
+  catch { return { ...row, tax_breakup: [] }; }
+};
+
+router.get("/estimates", async (req, res) => {
+  const where = [];
+  const args = [];
+  if (req.query.institute_id) { where.push("e.institute_id = ?"); args.push(req.query.institute_id); }
+  if (req.query.status) { where.push("e.status = ?"); args.push(req.query.status); }
+  const rows = await q(
+    `SELECT e.*, i.name AS institute FROM estimates e JOIN institutes i ON i.id = e.institute_id
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY e.created_at DESC LIMIT 300`,
+    args,
+  );
+  res.json({ rows: rows.map(parseBreakup) });
+});
+
+router.post("/estimates", async (req, res) => {
+  const institute = await one("SELECT id FROM institutes WHERE id = ?", [req.body?.institute_id]);
+  if (!institute) return res.status(400).json({ error: "Choose a university" });
+  const t = await estimateTotals(req.body);
+  if (t.amount <= 0) return res.status(400).json({ error: "Amount must be greater than zero" });
+  const id = uuid();
+  await q(
+    `INSERT INTO estimates (id, institute_id, estimate_no, description, amount, tax_amount, total_amount,
+       tax_breakup, valid_until, notes, status, created_by)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, institute.id, String(req.body?.estimate_no || "").trim() || (await nextEstimateNo()),
+     nullable(req.body?.description), t.amount, t.tax, t.total,
+     t.breakup.length ? JSON.stringify(t.breakup) : null, nullable(req.body?.valid_until),
+     nullable(req.body?.notes),
+     ["Draft", "Sent", "Cancelled"].includes(req.body?.status) ? req.body.status : "Draft",
+     req.user.email],
+  );
+  await logAudit(req, institute.id, "estimate.create", "estimates", id, { total: t.total });
+  res.status(201).json(parseBreakup(await one("SELECT * FROM estimates WHERE id = ?", [id])));
+});
+
+/** Estimates stay editable for as long as they have not become an invoice. */
+/** Everything the estimate PDF needs: buyer, seller settings and document text. */
+router.get("/estimates/:id/document", async (req, res) => {
+  const est = await one(
+    `SELECT e.*, i.name AS institute, i.contact_email, i.contact_phone, i.address AS institute_address
+     FROM estimates e JOIN institutes i ON i.id = e.institute_id WHERE e.id = ?`,
+    [req.params.id],
+  );
+  if (!est) return res.status(404).json({ error: "Estimate not found" });
+  const rows = await q("SELECT setting_key, setting_value FROM platform_settings");
+  const settings = Object.fromEntries(rows.map((r) => [r.setting_key, r.setting_value]));
+  let taxBreakup = [];
+  try { taxBreakup = JSON.parse(est.tax_breakup || "[]"); } catch { taxBreakup = []; }
+  res.json({ estimate: { ...est, tax_breakup: taxBreakup }, settings });
+});
+
+router.put("/estimates/:id", async (req, res) => {
+  const est = await one("SELECT * FROM estimates WHERE id = ?", [req.params.id]);
+  if (!est) return res.status(404).json({ error: "Estimate not found" });
+  if (est.status === "Converted") return res.status(400).json({ error: "This estimate is already an invoice" });
+  const t = await estimateTotals(req.body);
+  if (t.amount <= 0) return res.status(400).json({ error: "Amount must be greater than zero" });
+  await q(
+    `UPDATE estimates SET institute_id = ?, description = ?, amount = ?, tax_amount = ?, total_amount = ?,
+       tax_breakup = ?, valid_until = ?, notes = ?, status = ? WHERE id = ?`,
+    [req.body?.institute_id || est.institute_id, nullable(req.body?.description), t.amount, t.tax, t.total,
+     t.breakup.length ? JSON.stringify(t.breakup) : null, nullable(req.body?.valid_until),
+     nullable(req.body?.notes),
+     ["Draft", "Sent", "Cancelled"].includes(req.body?.status) ? req.body.status : est.status, est.id],
+  );
+  await logAudit(req, est.institute_id, "estimate.update", "estimates", est.id, { total: t.total });
+  res.json(parseBreakup(await one("SELECT * FROM estimates WHERE id = ?", [est.id])));
+});
+
+router.delete("/estimates/:id", async (req, res) => {
+  const est = await one("SELECT * FROM estimates WHERE id = ?", [req.params.id]);
+  if (!est) return res.status(404).json({ error: "Estimate not found" });
+  if (est.status === "Converted") return res.status(400).json({ error: "Converted estimates cannot be deleted" });
+  await q("DELETE FROM estimates WHERE id = ?", [est.id]);
+  await logAudit(req, est.institute_id, "estimate.delete", "estimates", est.id, { no: est.estimate_no });
+  res.json({ ok: true });
+});
+
+/** Turns a finalised estimate into a real payment / invoice row. */
+router.post("/estimates/:id/convert", async (req, res) => {
+  const est = await one("SELECT * FROM estimates WHERE id = ?", [req.params.id]);
+  if (!est) return res.status(404).json({ error: "Estimate not found" });
+  if (est.status === "Converted") return res.status(400).json({ error: "Already converted" });
+  const id = uuid();
+  const invoiceNo = await nextInvoiceNo();
+  const status = ["Pending", "Success"].includes(req.body?.status) ? req.body.status : "Pending";
+  await q(
+    `INSERT INTO payments (id, institute_id, invoice_no, description, amount, tax_amount, total_amount,
+       payment_mode, status, due_date, paid_at, created_by, tax_breakup)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, est.institute_id, invoiceNo, est.description, est.amount, est.tax_amount, est.total_amount,
+     ["Online", "Bank Transfer", "Cheque", "Cash", "UPI"].includes(req.body?.payment_mode) ? req.body.payment_mode : "Online",
+     status, est.valid_until,
+     status === "Success" ? new Date().toISOString().slice(0, 19).replace("T", " ") : null,
+     req.user.email, est.tax_breakup],
+  );
+  await q("UPDATE estimates SET status = 'Converted', payment_id = ? WHERE id = ?", [id, est.id]);
+  await logAudit(req, est.institute_id, "estimate.convert", "estimates", est.id, { invoiceNo });
+  res.status(201).json({ payment_id: id, invoice_no: invoiceNo });
+});
+
+
+
+
 
 router.get("/accounting/summary", async (req, res) => {
   const group = req.query.group === "day" ? "%Y-%m-%d" : req.query.group === "year" ? "%Y" : "%Y-%m";
@@ -510,6 +772,8 @@ router.get("/settings", async (_req, res) => {
 
 router.put("/settings", async (req, res) => {
   const allowed = ["grace_days", "company_name", "company_address", "gst_number", "currency", "invoice_footer",
+    "invoice_header_html", "invoice_footer_html", "invoice_bank_details", "invoice_terms",
+    "upi_id", "upi_payee_name",
     "platform_name", "site_brand", "site_tagline", "site_contact_email", "site_contact_phone",
     "site_contact_address", "site_custom_enabled", "site_home_html", "site_home_css",
     "site_contact_html", "site_contact_css", ...SEO_KEYS];

@@ -2,6 +2,7 @@ import { state } from "/app/admin.js";
 import { TIMEZONES, setTimezone } from "/app/api.js";
 import { ACCENTS, getAccent, applyAccent, getTheme, applyTheme } from "/app/theme.js";
 import { KIOSK_TEMPLATES, templateCss } from "/app/kiosk-templates.js";
+import { securityPanel } from "/app/pages/security.js";
 
 const TEXT_FIELDS = [
   ["institution_name", "University / institution name"],
@@ -355,4 +356,6 @@ export async function renderSettings(view, { api, esc, toast }) {
 
 
 
+
+  await securityPanel(view.querySelectorAll(".settings-col")[1] || view, { api, esc, toast });
 }

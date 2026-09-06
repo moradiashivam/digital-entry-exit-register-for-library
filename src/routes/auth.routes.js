@@ -9,7 +9,26 @@ import {
   logAudit,
 } from "../auth.js";
 import { sha256, randomToken } from "../crypto.js";
+import { evaluateLoginAccess, DENY_MESSAGE } from "../net-access.js";
 import { sendMail, smtpConfigured } from "../mailer.js";
+import {
+  signMfaTicket,
+  readMfaTicket,
+  startEnrolment,
+  enableTotp,
+  disableTotp,
+  verifyTotp,
+  userTotpSecret,
+  sendEmailOtp,
+  verifyEmailOtp,
+  enableFace,
+  disableFace,
+  verifyFace,
+  setEmailFactor,
+  userMethods,
+  mfaRequired,
+} from "../twofactor.js";
+
 
 const router = Router();
 
@@ -73,12 +92,178 @@ router.post("/login", async (req, res) => {
   if (!user || user.status !== "Active" || !(await verifyPassword(password, user.password_hash))) {
     return res.status(401).json({ error: "Invalid email or password" });
   }
+  // University Access Control — geography (owner) then IP list (university).
+  if (!user.is_platform_owner) {
+    const verdict = await evaluateLoginAccess(user.id, req);
+    if (!verdict.allowed) {
+      return res.status(403).json({ error: DENY_MESSAGE, detail: verdict.reason });
+    }
+  }
+  if (mfaRequired(user)) {
+    const methods = userMethods(user);
+    return res.json({
+      mfa: true,
+      mfaToken: signMfaTicket(user),
+      methods,
+      emailHint: maskEmail(user.email),
+      message: methods.totp
+        ? "Enter the 6-digit code from your Authenticator app"
+        : methods.face
+          ? "Verify with your face to finish signing in"
+          : "We can email you a one-time sign-in code",
+    });
+  }
   await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
   res.json({
     token: signToken(user),
     user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
   });
 });
+
+const maskEmail = (email) => {
+  const [name, domain] = String(email).split("@");
+  return `${name.slice(0, 2)}${"•".repeat(Math.max(2, name.length - 2))}@${domain || ""}`;
+};
+
+async function ticketUser(req, res) {
+  const id = readMfaTicket(req.body?.mfaToken);
+  const user = id ? await one("SELECT * FROM users WHERE id = ?", [id]) : null;
+  if (!user || user.status !== "Active") {
+    res.status(401).json({ error: "This sign-in attempt expired — start again", restart: true });
+    return null;
+  }
+  return user;
+}
+
+/** Step 2 — verify the Authenticator code (or the emailed code). */
+router.post("/login/verify", async (req, res) => {
+  const user = await ticketUser(req, res);
+  if (!user) return;
+  const code = String(req.body?.code || "").trim();
+  if (!rateLimit(`mfa:${user.id}`, 10, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: "Too many codes tried — wait a few minutes" });
+  }
+  const ok =
+    (req.body?.method === "email"
+      ? await verifyEmailOtp(user.id, code)
+      : verifyTotp(userTotpSecret(user), code)) ||
+    (req.body?.method !== "email" && (await verifyEmailOtp(user.id, code)));
+  if (!ok) return res.status(401).json({ error: "That code is not correct or has expired" });
+  await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
+  res.json({
+    token: signToken(user),
+    user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
+  });
+});
+
+/** Step 2 (face) — verify the captured face descriptor against the enrolled one. */
+router.post("/login/face", async (req, res) => {
+  const user = await ticketUser(req, res);
+  if (!user) return;
+  if (!rateLimit(`face:${user.id}`, 10, 10 * 60 * 1000)) {
+    return res.status(429).json({ error: "Too many face attempts — wait a few minutes" });
+  }
+  if (!user.face_2fa_enabled) return res.status(400).json({ error: "Face sign-in is not set up for this account" });
+  if (!verifyFace(user, req.body?.descriptor)) {
+    return res.status(401).json({ error: "Face did not match — try again or use another method" });
+  }
+  await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
+  res.json({
+    token: signToken(user),
+    user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
+  });
+});
+
+/** Step 2 (fallback) — email a one-time code instead of using the app. */
+router.post("/login/email-otp", async (req, res) => {
+  const user = await ticketUser(req, res);
+  if (!user) return;
+  if (!rateLimit(`otp:${user.id}`, 5, 15 * 60 * 1000)) {
+    return res.status(429).json({ error: "Too many codes requested — try again later" });
+  }
+  try {
+    const out = await sendEmailOtp(user);
+    res.json({ ...out, email: maskEmail(user.email) });
+  } catch (e) {
+    res.status(503).json({ error: e.message });
+  }
+});
+
+/** Two-factor management for the signed-in user. */
+router.get("/2fa", requireAuth, async (req, res) => {
+  const user = await one(
+    "SELECT totp_enabled, face_2fa_enabled, email_2fa_enabled FROM users WHERE id = ?",
+    [req.user.id],
+  );
+  const methods = userMethods(user || {});
+  res.json({
+    enabled: !!user?.totp_enabled, // kept for older screens
+    methods,
+    any: methods.totp || methods.face || methods.email,
+    emailReady: await smtpConfigured(),
+    email: req.user.email,
+  });
+});
+
+/** Face authentication as a second factor. */
+router.post("/2fa/face/enable", requireAuth, async (req, res) => {
+  const out = await enableFace(req.user.id, req.body?.descriptor);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  await logAudit(req, null, "user.2fa_face_enabled", "users", req.user.id, null);
+  res.json({ ok: true });
+});
+
+router.post("/2fa/face/disable", requireAuth, async (req, res) => {
+  const user = await one("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  if (!(await verifyPassword(String(req.body?.password || ""), user.password_hash))) {
+    return res.status(400).json({ error: "Your password is incorrect" });
+  }
+  await disableFace(req.user.id);
+  await logAudit(req, null, "user.2fa_face_disabled", "users", req.user.id, null);
+  res.json({ ok: true });
+});
+
+/** Emailed one-time code as a stand-alone second factor. */
+router.post("/2fa/email", requireAuth, async (req, res) => {
+  const on = !!req.body?.enabled;
+  if (on && !(await smtpConfigured())) {
+    return res.status(400).json({ error: "Email is not configured yet — ask the platform owner" });
+  }
+  if (!on) {
+    const user = await one("SELECT password_hash FROM users WHERE id = ?", [req.user.id]);
+    if (!(await verifyPassword(String(req.body?.password || ""), user.password_hash))) {
+      return res.status(400).json({ error: "Your password is incorrect" });
+    }
+  }
+  await setEmailFactor(req.user.id, on);
+  await logAudit(req, null, on ? "user.2fa_email_enabled" : "user.2fa_email_disabled", "users", req.user.id, null);
+  res.json({ ok: true });
+});
+
+router.post("/2fa/setup", requireAuth, async (req, res) => {
+  const user = await one("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  if (user.totp_enabled) return res.status(400).json({ error: "Two-factor is already enabled" });
+  res.json(await startEnrolment(user));
+});
+
+router.post("/2fa/enable", requireAuth, async (req, res) => {
+  const user = await one("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  const out = await enableTotp(user, req.body?.code);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  await logAudit(req, null, "user.2fa_enabled", "users", req.user.id, null);
+  res.json({ ok: true });
+});
+
+router.post("/2fa/disable", requireAuth, async (req, res) => {
+  const user = await one("SELECT * FROM users WHERE id = ?", [req.user.id]);
+  if (!(await verifyPassword(String(req.body?.password || ""), user.password_hash))) {
+    return res.status(400).json({ error: "Your password is incorrect" });
+  }
+  await disableTotp(req.user.id);
+  await logAudit(req, null, "user.2fa_disabled", "users", req.user.id, null);
+  res.json({ ok: true });
+});
+
 
 /** Current user + the universities they can work in. */
 router.get("/me", requireAuth, async (req, res) => {

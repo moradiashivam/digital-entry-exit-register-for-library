@@ -60,7 +60,7 @@ router.get("/posts", withInstitute(isMember), requireModule("kiosks"), async (re
     [req.institute.id],
   );
   const settings = await one(
-    "SELECT display_enabled, display_idle_seconds, display_slide_seconds FROM kiosk_settings WHERE institute_id = ?",
+    "SELECT display_enabled, display_idle_seconds, display_slide_seconds, display_hint_enabled, display_hint_text FROM kiosk_settings WHERE institute_id = ?",
     [req.institute.id],
   );
   res.json({ posts: await decorate(req.institute.id, rows), devices, settings: settings || {} });
@@ -72,10 +72,13 @@ router.put("/settings", withInstitute(), requireModule("kiosks"), requireWrite, 
     display_enabled: req.body?.display_enabled ? 1 : 0,
     display_idle_seconds: Math.min(3600, Math.max(5, Number(req.body?.display_idle_seconds) || 30)),
     display_slide_seconds: Math.min(300, Math.max(3, Number(req.body?.display_slide_seconds) || 10)),
+    display_hint_enabled: req.body?.display_hint_enabled === undefined ? 1 : (req.body.display_hint_enabled ? 1 : 0),
+    display_hint_text: String(req.body?.display_hint_text ?? "Touch the screen to make an entry").trim().slice(0, 300)
+      || "Touch the screen to make an entry",
   };
   await q(
     `INSERT INTO kiosk_settings (institute_id, ${Object.keys(patch).join(", ")})
-     VALUES (?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE ${Object.keys(patch).map((k) => `${k} = VALUES(${k})`).join(", ")}`,
     [req.institute.id, ...Object.values(patch)],
   );

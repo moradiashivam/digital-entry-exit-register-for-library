@@ -498,3 +498,132 @@ body.light .kiosk-idle { background: #f1f5f9; color: #0f172a; }
 .kiosk-idle-dots { display: flex; gap: .4rem; justify-content: center; margin-top: .8rem; }
 .kiosk-idle-dots span { width: 9px; height: 9px; border-radius: 50%; background: currentColor; opacity: .3; }
 .kiosk-idle-dots span.on { opacity: .95; }
+
+/* ---- Invoice generator dialog (Owner → Payments & accounting) ---- */
+.modal-back {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+  background: rgba(0, 0, 0, .45); padding: 1rem;
+}
+.modal-card { width: min(420px, 100%); }
+.modal-card .chk {
+  display: flex; align-items: center; gap: .5rem; margin: .35rem 0; cursor: pointer;
+}
+.modal-card .chk input { width: auto; margin: 0; }
+
+/* ---- Face ID scanning animation (shared: login, kiosk, Face ID enrolment) ---- */
+.fsfx {
+  position: absolute; inset: 0; pointer-events: none; overflow: hidden;
+  border-radius: inherit; color: #6ee7ff;
+  font-family: inherit;
+  --fsfx: #6ee7ff;
+}
+.fsfx.is-success { --fsfx: #34d399; }
+.fsfx.is-fail { --fsfx: #f87171; animation: fsfx-shake .4s ease; }
+.fsfx.is-detected, .fsfx.is-verifying { --fsfx: #a78bfa; }
+
+/* corner brackets */
+.fsfx-frame { position: absolute; inset: 8%; }
+.fsfx-c {
+  position: absolute; width: 16%; height: 16%;
+  border: 3px solid var(--fsfx); border-radius: 6px;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--fsfx) 60%, transparent);
+  transition: inset .35s ease, border-color .3s ease, opacity .3s ease;
+}
+.fsfx-c.tl { top: 0; left: 0; border-right-color: transparent; border-bottom-color: transparent; border-radius: 8px 0 0 0; }
+.fsfx-c.tr { top: 0; right: 0; border-left-color: transparent; border-bottom-color: transparent; border-radius: 0 8px 0 0; }
+.fsfx-c.bl { bottom: 0; left: 0; border-right-color: transparent; border-top-color: transparent; border-radius: 0 0 0 8px; }
+.fsfx-c.br { bottom: 0; right: 0; border-left-color: transparent; border-top-color: transparent; border-radius: 0 0 8px 0; }
+.fsfx.is-scanning .fsfx-frame { animation: fsfx-breathe 2.4s ease-in-out infinite; }
+
+/* digital grid + sweeping scan line */
+.fsfx-grid {
+  position: absolute; inset: 0; opacity: .18;
+  background-image:
+    linear-gradient(to right, var(--fsfx) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--fsfx) 1px, transparent 1px);
+  background-size: 26px 26px;
+  mask-image: radial-gradient(circle at 50% 50%, #000 35%, transparent 78%);
+}
+.fsfx-sweep {
+  position: absolute; left: 0; right: 0; height: 26%;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--fsfx) 45%, transparent), transparent);
+  border-bottom: 2px solid var(--fsfx);
+  opacity: 0;
+}
+.fsfx.is-scanning .fsfx-sweep, .fsfx.is-detected .fsfx-sweep {
+  opacity: .9; animation: fsfx-sweep 2s cubic-bezier(.45,0,.55,1) infinite;
+}
+
+/* face outline + landmark dots */
+.fsfx-face { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fsfx-oval {
+  fill: none; stroke: var(--fsfx); stroke-width: .6; opacity: .45;
+  stroke-dasharray: 6 5;
+}
+.fsfx.is-scanning .fsfx-oval { animation: fsfx-spin-dash 12s linear infinite; }
+.fsfx-marks circle { fill: var(--fsfx); opacity: 0; }
+.fsfx.is-scanning .fsfx-marks circle,
+.fsfx.is-detected .fsfx-marks circle,
+.fsfx.is-verifying .fsfx-marks circle { animation: fsfx-pop 1.6s ease-in-out infinite; }
+.fsfx.is-detected .fsfx-marks circle, .fsfx.is-verifying .fsfx-marks circle { animation-duration: 1s; }
+
+/* radar ring */
+.fsfx-ring { position: absolute; left: 50%; top: 50%; width: 62%; aspect-ratio: 1; transform: translate(-50%, -50%); }
+.fsfx-ring span {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--fsfx) 45%, transparent);
+  border-top-color: var(--fsfx);
+}
+.fsfx-ring span:last-child { inset: 12%; border-top-color: transparent; border-bottom-color: var(--fsfx); }
+.fsfx.is-scanning .fsfx-ring span { animation: fsfx-rotate 3.4s linear infinite; }
+.fsfx.is-verifying .fsfx-ring span { animation: fsfx-rotate 1s linear infinite; }
+.fsfx.is-scanning .fsfx-ring span:last-child,
+.fsfx.is-verifying .fsfx-ring span:last-child { animation-direction: reverse; }
+.fsfx.is-success .fsfx-ring, .fsfx.is-fail .fsfx-ring,
+.fsfx.is-success .fsfx-sweep, .fsfx.is-success .fsfx-grid { opacity: 0; }
+
+/* result tick / cross */
+.fsfx-mark {
+  position: absolute; left: 50%; top: 50%; width: 34%; max-width: 130px; aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(.6); opacity: 0; transition: opacity .25s ease, transform .3s ease;
+}
+.fsfx-mark circle, .fsfx-mark path { fill: none; stroke: var(--fsfx); stroke-width: 3.5; stroke-linecap: round; }
+.fsfx-tick, .fsfx-cross { stroke-dasharray: 60; stroke-dashoffset: 60; }
+.fsfx.is-success .fsfx-mark, .fsfx.is-fail .fsfx-mark { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.fsfx.is-success .fsfx-tick, .fsfx.is-fail .fsfx-cross { animation: fsfx-draw .45s .1s ease forwards; }
+.fsfx.is-success .fsfx-cross, .fsfx.is-fail .fsfx-tick { display: none; }
+.fsfx.is-success .fsfx-mark-ring { animation: fsfx-pulse 1.4s ease-out infinite; }
+.fsfx.is-success::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--fsfx) 30%, transparent), transparent 65%);
+}
+
+/* status label */
+.fsfx-label {
+  position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: .45rem; margin: 0;
+  padding: .35rem .8rem; border-radius: 999px; white-space: nowrap; max-width: 92%;
+  background: rgba(6, 12, 24, .72); color: #eaf6ff;
+  border: 1px solid color-mix(in srgb, var(--fsfx) 55%, transparent);
+  font-size: clamp(.72rem, 1.6vw, .95rem); letter-spacing: .03em;
+  backdrop-filter: blur(4px);
+}
+.fsfx-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fsfx); animation: fsfx-blink 1.1s ease-in-out infinite; }
+.fsfx.is-success .fsfx-dot, .fsfx.is-fail .fsfx-dot { animation: none; }
+.fsfx-compact .fsfx-grid { display: none; }
+.fsfx-compact .fsfx-label { bottom: 3%; }
+
+@keyframes fsfx-sweep { 0% { top: -26%; } 100% { top: 100%; } }
+@keyframes fsfx-rotate { to { transform: rotate(360deg); } }
+@keyframes fsfx-spin-dash { to { stroke-dashoffset: -110; } }
+@keyframes fsfx-pop { 0%, 100% { opacity: .15; r: 1.2; } 50% { opacity: 1; r: 2; } }
+@keyframes fsfx-blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@keyframes fsfx-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+@keyframes fsfx-draw { to { stroke-dashoffset: 0; } }
+@keyframes fsfx-pulse { 0% { opacity: .9; transform-origin: center; } 100% { opacity: 0; } }
+@keyframes fsfx-shake {
+  0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fsfx *, .fsfx { animation: none !important; }
+}

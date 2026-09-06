@@ -8,6 +8,7 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
     const profiles = arr(data.smtp);
     const primary = profiles.find((p) => !p.is_fallback) || {};
     const fallback = profiles.find((p) => p.is_fallback) || {};
+    const taxes = arr(((await api("/api/owner/tax-rates")) || {}).taxes);
 
     const smtpForm = (id, p, label) => `
       <div class="panel" data-smtp="${id}">
@@ -54,9 +55,47 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
           <div style="flex:1;min-width:240px"><label for="c_foot">Invoice footer</label>
             <textarea id="c_foot" rows="2" style="width:100%">${esc(s.invoice_footer || "")}</textarea></div>
         </div>
+        <div class="row">
+          <div style="flex:1;min-width:240px"><label for="c_head_html">Invoice header (printed at the top)</label>
+            <textarea id="c_head_html" rows="3" style="width:100%" placeholder="Company name, address, GST — plain text or HTML">${esc(s.invoice_header_html || "")}</textarea></div>
+          <div style="flex:1;min-width:240px"><label for="c_foot_html">Invoice footer (printed at the bottom)</label>
+            <textarea id="c_foot_html" rows="3" style="width:100%" placeholder="Thank you note, contact line — plain text or HTML">${esc(s.invoice_footer_html || "")}</textarea></div>
+        </div>
+        <div class="row">
+          <div style="flex:1;min-width:240px"><label for="c_bank">Bank details (shown next to the payment box)</label>
+            <textarea id="c_bank" rows="4" style="width:100%" placeholder="Account name&#10;Account number&#10;IFSC / SWIFT&#10;Bank &amp; branch">${esc(s.invoice_bank_details || "")}</textarea></div>
+          <div style="flex:1;min-width:240px"><label for="c_terms">Terms &amp; conditions (printed on the back page)</label>
+            <textarea id="c_terms" rows="4" style="width:100%" placeholder="One condition per line">${esc(s.invoice_terms || "")}</textarea></div>
+        </div>
+        <div class="row">
+          <div style="min-width:220px"><label for="c_upi">UPI ID (for invoice QR codes)</label>
+            <input id="c_upi" style="width:100%" placeholder="name@bank" value="${esc(s.upi_id || "")}" /></div>
+          <div style="min-width:220px"><label for="c_upi_name">UPI payee name</label>
+            <input id="c_upi_name" style="width:100%" value="${esc(s.upi_payee_name || "")}" /></div>
+        </div>
         <button id="saveSettings" style="margin-top:.6rem">Save settings</button>
         <p class="muted">During the grace period an expired university keeps read-only access before it is suspended.</p>
       </div>
+
+      <div class="panel" style="margin-top:1rem">
+        <h3 style="margin-top:0">GST tax rates</h3>
+        <p class="muted">Set each rate once here. Payments, invoices and reports always use these percentages.</p>
+        <div style="overflow:auto"><table>
+          <thead><tr><th>Type</th><th>Tax name</th><th>Percentage</th><th>Status</th></tr></thead>
+          <tbody>${taxes.map((t) => `
+            <tr data-tax="${esc(t.code)}">
+              <td><strong>${esc(t.code)}</strong></td>
+              <td><input data-t="name" value="${esc(t.name)}" /></td>
+              <td><input data-t="percent" type="number" min="0" max="100" step="0.01"
+                    value="${esc(t.percent)}" style="width:7rem" /> %</td>
+              <td><label class="chk"><input data-t="active" type="checkbox" ${t.active ? "checked" : ""} /> Active</label></td>
+            </tr>`).join("")}
+          </tbody>
+        </table></div>
+        <button id="saveTaxes" style="margin-top:.6rem">Save tax rates</button>
+      </div>
+
+
 
       <h3 style="margin:1.2rem 0 .4rem">Email (SMTP)</h3>
       ${smtpForm("primary", primary, "Primary SMTP")}
@@ -135,10 +174,34 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
             gst_number: view.querySelector("#c_gst").value,
             currency: view.querySelector("#c_currency").value,
             invoice_footer: view.querySelector("#c_foot").value,
+            invoice_header_html: view.querySelector("#c_head_html").value,
+            invoice_footer_html: view.querySelector("#c_foot_html").value,
+            invoice_bank_details: view.querySelector("#c_bank").value,
+            invoice_terms: view.querySelector("#c_terms").value,
             grace_days: view.querySelector("#c_grace").value,
+            upi_id: view.querySelector("#c_upi").value.trim(),
+            upi_payee_name: view.querySelector("#c_upi_name").value.trim(),
+
           },
         });
         toast("Settings saved");
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+
+    view.querySelector("#saveTaxes").onclick = async () => {
+      const body = {
+        taxes: [...view.querySelectorAll("[data-tax]")].map((row) => ({
+          code: row.dataset.tax,
+          name: row.querySelector('[data-t="name"]').value,
+          percent: Number(row.querySelector('[data-t="percent"]').value || 0),
+          active: row.querySelector('[data-t="active"]').checked,
+        })),
+      };
+      try {
+        await api("/api/owner/tax-rates", { method: "PUT", body });
+        toast("Tax rates saved");
       } catch (e) {
         toast(e.message, true);
       }

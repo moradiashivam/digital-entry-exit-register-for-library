@@ -88,6 +88,8 @@ function camHint(text) { const h = el("cameraHint"); if (h) h.textContent = text
 function stopCamera() {
   scanning = false;
   faceRunning = false;
+  faceFx?.idle();
+
   try { zxingReader?.reset?.(); } catch {}
   zxingReader = null;
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
@@ -170,6 +172,16 @@ let faceRunning = false;
 let faceData = null;
 let lastFaceMember = "";
 let lastFaceAt = 0;
+let faceFx = null;
+
+/** Lazily attaches the shared Face ID scanning animation over the camera. */
+async function faceOverlay() {
+  if (!faceFx) {
+    const { attachFaceScan } = await import("/app/face-scan-fx.js");
+    faceFx = attachFaceScan(document.querySelector(".kiosk-video-wrap"));
+  }
+  return faceFx;
+}
 
 async function loadFaceData() {
   if (faceData) return faceData;
@@ -182,37 +194,47 @@ async function loadFaceData() {
 async function startFaceLoop(video) {
   if (faceRunning) return;
   faceRunning = true;
+  const fx = await faceOverlay();
   let fr;
   try {
     fr = await import("/app/face-engine.js");
     const data = await loadFaceData();
     if (!data.faces.length) {
       camHint("No faces are enrolled yet. Ask the library desk to enrol photos first.");
+      fx.idle();
       faceRunning = false;
       return;
     }
     camHint("Loading the face model…");
+    fx.scanning("Preparing face scanner…");
     await fr.loadModels(data.model_url);
     camHint("Look straight at the camera.");
+    fx.scanning("Scanning face…");
   } catch (e) {
     camHint(e.message || "Face recognition could not start.");
+    fx.idle();
     faceRunning = false;
     return;
   }
 
   const loop = async () => {
-    if (!faceRunning || !scanning) return;
+    if (!faceRunning || !scanning) { fx.idle(); return; }
     try {
       const found = await fr.describeFace(video, faceData.model_url);
       if (found) {
+        fx.detected("Face detected");
         const match = fr.bestMatch(found.descriptor, faceData.faces, faceData.threshold || 0.55);
         const now = Date.now();
         if (!match) {
           camHint("Face not recognised — try again or use your member code.");
+          fx.fail("Face not recognised — try again");
         } else if (match.member_id !== lastFaceMember || now - lastFaceAt > 6000) {
           lastFaceMember = match.member_id;
           lastFaceAt = now;
           camHint(`Face matched (${match.confidence}%)`);
+          fx.verifying("Verifying identity…");
+          fx.success(`Verified ✓ ${match.confidence}%`);
+          setTimeout(() => { if (faceRunning && scanning) fx.scanning("Scanning face…"); }, 2200);
           submitScan(match.member_id, "Face", match.confidence);
         }
       }
@@ -221,6 +243,7 @@ async function startFaceLoop(video) {
   };
   requestAnimationFrame(loop);
 }
+
 
 
 /* ---------- Library activities / services: idle display ----------
@@ -263,6 +286,15 @@ function paintIdleSlide() {
   el("idleCategory").textContent = post.category || "";
   el("idleTitle").textContent = post.title || "";
   el("idleBody").textContent = post.body || "";
+  // Instructional line (e.g. "Touch the screen to make an entry") — optional,
+  // customizable per university and per kiosk; hidden entirely when switched off.
+  const hint = el("idleHint");
+  if (hint) {
+    const h = idleConfig.hint || {};
+    const show = h.enabled !== false && String(h.text || "").trim();
+    hint.hidden = !show;
+    hint.textContent = show ? String(h.text).trim() : "";
+  }
   el("idleDots").innerHTML = idlePosts
     .map((_, i) => `<span class="${i === idleIndex ? "on" : ""}"></span>`).join("");
 }

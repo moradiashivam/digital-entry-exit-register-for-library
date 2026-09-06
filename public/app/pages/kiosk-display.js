@@ -32,13 +32,6 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
   await load();
 
   view.innerHTML = `
-    <div class="panel-head kd-head">
-      <h3 style="margin:0">Library activities &amp; kiosk display</h3>
-      <p class="muted">When a kiosk is not being used, it can show your library services, activities,
-        events, announcements, photographs and videos instead of an empty screen.
-        Scanning is never blocked — the moment a student touches the screen or scans a card the normal kiosk returns.</p>
-    </div>
-
     <div class="panel" style="margin-top:1rem">
       <h4 style="margin:0 0 .6rem">Idle screen</h4>
       <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:1rem">
@@ -51,6 +44,15 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
           <input id="dSlide" type="number" min="3" max="300" style="width:130px" /></div>
         <button id="dSave">Save idle settings</button>
       </div>
+      <div class="row" style="flex-wrap:wrap;align-items:flex-end;gap:1rem;margin-top:.8rem">
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:500">
+          <input type="checkbox" id="dHintEnabled" /> Show an instructional message on the idle screen
+        </label>
+        <div style="flex:1;min-width:260px"><label for="dHintText">Message shown over the library activities</label>
+          <input id="dHintText" maxlength="300" style="width:100%" placeholder="Touch the screen to make an entry" /></div>
+      </div>
+      <p class="muted" style="margin:.5rem 0 0">This is the default for every kiosk. To give one kiosk a different
+        message — or to hide it there — use the "Idle message" column under Master setting → Kiosks / terminals.</p>
     </div>
 
     <div class="grid cols-2" style="margin-top:1rem;align-items:start">
@@ -221,6 +223,8 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
     $("#dEnabled").checked = Number(s.display_enabled) === 1;
     $("#dIdle").value = Number(s.display_idle_seconds) || 30;
     $("#dSlide").value = Number(s.display_slide_seconds) || 10;
+    $("#dHintEnabled").checked = s.display_hint_enabled === undefined || Number(s.display_hint_enabled) === 1;
+    $("#dHintText").value = s.display_hint_text || "Touch the screen to make an entry";
   }
 
   $("#dSave").onclick = async () => {
@@ -231,6 +235,8 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
           display_enabled: $("#dEnabled").checked,
           display_idle_seconds: Number($("#dIdle").value),
           display_slide_seconds: Number($("#dSlide").value),
+          display_hint_enabled: $("#dHintEnabled").checked,
+          display_hint_text: $("#dHintText").value.trim(),
         },
       });
       toast("Idle screen settings saved");

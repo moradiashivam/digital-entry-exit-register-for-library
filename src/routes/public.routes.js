@@ -48,14 +48,33 @@ router.get("/kiosk/:slug/posts", async (req, res) => {
   const inst = await one("SELECT id FROM institutes WHERE slug = ?", [req.params.slug]);
   if (!inst) return res.status(404).json({ error: "Unknown kiosk link" });
   const settings = await one(
-    "SELECT display_enabled, display_idle_seconds, display_slide_seconds FROM kiosk_settings WHERE institute_id = ?",
+    "SELECT display_enabled, display_idle_seconds, display_slide_seconds, display_hint_enabled, display_hint_text FROM kiosk_settings WHERE institute_id = ?",
     [inst.id],
   );
   const enabled = Number(settings?.display_enabled) === 1;
+
+  // Per-kiosk override of the instructional hint (NULL columns = institute default).
+  let hintEnabled = settings?.display_hint_enabled === undefined ? 1 : Number(settings.display_hint_enabled);
+  let hintText = String(settings?.display_hint_text ?? "").trim() || "Touch the screen to make an entry";
+  const deviceId = String(req.query.device || "").trim();
+  if (deviceId) {
+    const dev = await one(
+      "SELECT display_hint_enabled, display_hint_text FROM kiosk_devices WHERE institute_id = ? AND device_id = ?",
+      [inst.id, deviceId],
+    );
+    if (dev) {
+      if (dev.display_hint_enabled !== null && dev.display_hint_enabled !== undefined) hintEnabled = Number(dev.display_hint_enabled);
+      if (dev.display_hint_text !== null && dev.display_hint_text !== undefined && String(dev.display_hint_text).trim()) {
+        hintText = String(dev.display_hint_text).trim();
+      }
+    }
+  }
+
   res.json({
     enabled,
     idle_seconds: Number(settings?.display_idle_seconds) || 30,
     slide_seconds: Number(settings?.display_slide_seconds) || 10,
+    hint: { enabled: hintEnabled === 1, text: hintText },
     posts: enabled ? await activePostsFor(inst.id, req.query.device) : [],
   });
 });

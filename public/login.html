@@ -27,7 +27,33 @@
         <p id="error" class="muted" style="color:var(--danger)"></p>
         <p class="muted" style="margin-top:.4rem"><a href="/forgot.html">Forgot your password?</a></p>
       </form>
+
+      <form id="mfaForm" hidden style="margin-top:1rem">
+        <h2 style="font-size:1.05rem;margin:0 0 .3rem">Two-step verification</h2>
+        <p class="muted" id="mfaHint">Enter the 6-digit code from your Authenticator app.</p>
+        <div id="codeBlock">
+          <label for="mfaCode">Code</label>
+          <input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="8" style="width:100%" />
+          <button type="submit" style="width:100%;margin-top:1rem" id="mfaSubmit">Verify &amp; sign in</button>
+        </div>
+        <div id="faceBlock" hidden style="margin-top:.6rem">
+          <div id="faceStage" style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3">
+            <video id="faceVideo" autoplay muted playsinline
+                   style="width:100%;height:100%;object-fit:cover;display:block"></video>
+          </div>
+          <button type="button" id="faceVerify" style="width:100%;margin-top:.6rem">Verify my face</button>
+        </div>
+
+        <div class="row" style="gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
+          <button type="button" class="ghost" id="useApp" hidden style="flex:1">Use Authenticator app</button>
+          <button type="button" class="ghost" id="useFace" hidden style="flex:1">Use face</button>
+          <button type="button" class="ghost" id="emailOtp" hidden style="flex:1">Email me a code</button>
+        </div>
+        <p id="mfaError" class="muted" style="color:var(--danger)"></p>
+        <p class="muted" style="margin-top:.4rem"><a href="/login.html">Start again</a></p>
+      </form>
       <p class="muted" style="margin-top:1rem">Kiosk screen? Open <code>/kiosk/&lt;university-link&gt;</code>.</p>
+
     </section>
   </main>
 
@@ -69,6 +95,14 @@
             captchaText: captchaInput.value,
           },
         });
+        if (out.mfa) {
+          mfaToken = out.mfaToken;
+          methods = out.methods || { totp: true };
+          form.hidden = true;
+          mfaForm.hidden = false;
+          setupMethods();
+          return;
+        }
         setToken(out.token);
         location.href = "/admin";
       } catch (err) {
@@ -78,6 +112,126 @@
         document.getElementById("submit").disabled = false;
       }
     });
+
+    // ---- Two-step verification (Authenticator app, face, or an emailed code) ----
+    let mfaToken = null;
+    let methods = {};
+    let faceStream = null;
+    const mfaForm = document.getElementById("mfaForm");
+    const mfaError = document.getElementById("mfaError");
+
+    const el = (id) => document.getElementById(id);
+
+    function setupMethods() {
+      el("useApp").hidden = !methods.totp;
+      el("useFace").hidden = !methods.face;
+      el("emailOtp").hidden = !(methods.email || methods.totp);
+      if (methods.totp) showCode("Enter the 6-digit code from your Authenticator app.");
+      else if (methods.face) startFace();
+      else requestEmailCode();
+    }
+
+    function stopFace() {
+      if (faceStream) { faceStream.getTracks().forEach((t) => t.stop()); faceStream = null; }
+    }
+
+    function showCode(hint) {
+      stopFace();
+      el("faceBlock").hidden = true;
+      el("codeBlock").hidden = false;
+      el("mfaHint").textContent = hint;
+      el("mfaCode").focus();
+    }
+
+    let faceFx = null;
+    async function faceOverlay() {
+      if (!faceFx) {
+        const { attachFaceScan } = await import("/app/face-scan-fx.js");
+        faceFx = attachFaceScan(el("faceStage"), { compact: true });
+      }
+      return faceFx;
+    }
+
+    async function startFace() {
+      el("codeBlock").hidden = true;
+      el("faceBlock").hidden = false;
+      el("mfaHint").textContent = "Look at the camera, then press Verify my face.";
+      try {
+        faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        el("faceVideo").srcObject = faceStream;
+        (await faceOverlay()).scanning("Scanning face…");
+      } catch {
+        mfaError.textContent = "The camera could not be opened — allow camera access or use another method.";
+      }
+    }
+
+    async function requestEmailCode() {
+      mfaError.textContent = "";
+      const btn = el("emailOtp");
+      btn.disabled = true;
+      try {
+        const out = await api("/api/auth/login/email-otp", { method: "POST", body: { mfaToken } });
+        showCode(`We emailed a 6-digit code to ${out.email}. It expires in ${out.minutes} minutes.`);
+      } catch (err) {
+        mfaError.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    el("useApp").addEventListener("click", () => showCode("Enter the 6-digit code from your Authenticator app."));
+    el("useFace").addEventListener("click", startFace);
+
+    el("faceVerify").addEventListener("click", async () => {
+      mfaError.textContent = "";
+      const btn = el("faceVerify");
+      btn.disabled = true;
+      btn.textContent = "Checking…";
+      const fx = await faceOverlay();
+      fx.scanning("Scanning face…");
+      try {
+        const { describeFace } = await import("/app/face-engine.js");
+        const found = await describeFace(el("faceVideo"));
+        if (!found) { fx.fail("No face detected — move closer"); throw new Error("No clear face detected — move closer and try again."); }
+        fx.detected("Face detected");
+        fx.verifying("Verifying identity…");
+        const out = await api("/api/auth/login/face", {
+          method: "POST",
+          body: { mfaToken, descriptor: found.descriptor },
+        });
+        fx.success("Authenticated ✓");
+        setToken(out.token);
+        setTimeout(() => { stopFace(); location.href = "/admin"; }, 900);
+      } catch (err) {
+        if (fx.el && !fx.el.classList.contains("is-fail")) fx.fail("Face not recognised — try again");
+        mfaError.textContent = err.message;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Verify my face";
+      }
+    });
+
+
+    mfaForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      mfaError.textContent = "";
+      document.getElementById("mfaSubmit").disabled = true;
+      try {
+        const out = await api("/api/auth/login/verify", {
+          method: "POST",
+          body: { mfaToken, code: document.getElementById("mfaCode").value },
+        });
+        setToken(out.token);
+        location.href = "/admin";
+      } catch (err) {
+        mfaError.textContent = err.message;
+      } finally {
+        document.getElementById("mfaSubmit").disabled = false;
+      }
+    });
+
+    el("emailOtp").addEventListener("click", requestEmailCode);
+
   </script>
 </body>
 </html>

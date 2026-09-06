@@ -110,6 +110,14 @@ export async function renderOwnerTenants(view, { api, esc, toast, fmtDate }) {
         <p class="muted">Leave the end date untouched and press save to extend by one billing cycle.</p>
       </div>
 
+      <div class="panel" style="margin-top:.8rem">
+        <h4 style="margin-top:0">Access control — permitted location</h4>
+        <p class="muted">Allow this university to be used only from the places you list.
+          Leave a box empty to accept anything at that level. Separate several entries with commas.
+          The university's own admin can additionally limit permitted IP addresses.</p>
+        <div id="geoBox" class="muted">Loading…</div>
+      </div>
+
       <div class="grid cols-2" style="margin-top:.8rem">
         <div class="panel"><h4 style="margin-top:0">Subscription history</h4>
           <table><thead><tr><th>When</th><th>Action</th><th>New end</th><th>By</th></tr></thead>
@@ -154,6 +162,49 @@ export async function renderOwnerTenants(view, { api, esc, toast, fmtDate }) {
         toast(e.message, true);
       }
     };
+    const geoBox = dlg.querySelector("#geoBox");
+    const paintGeo = (a) => {
+      geoBox.innerHTML = `
+        <label><input id="g_on" type="checkbox" ${a.geo_enabled ? "checked" : ""} /> Restrict this university to the location below</label>
+        <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
+          <div><label for="g_country">Country</label><input id="g_country" value="${esc(a.geo_countries || "")}" placeholder="India" /></div>
+          <div><label for="g_state">State / region</label><input id="g_state" value="${esc(a.geo_states || "")}" placeholder="Gujarat" /></div>
+          <div><label for="g_city">City / area</label><input id="g_city" value="${esc(a.geo_cities || "")}" placeholder="Rajkot" /></div>
+          <div><label for="g_note">Note</label><input id="g_note" value="${esc(a.geo_note || "")}" placeholder="Optional" /></div>
+        </div>
+        <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
+          <label><input id="g_priv" type="checkbox" ${a.geo_allow_private ? "checked" : ""} /> Allow computers on the campus network (no public address)</label>
+          <label><input id="g_open" type="checkbox" ${a.geo_fail_open ? "checked" : ""} /> Allow sign-in when the location cannot be checked</label>
+          <button id="saveGeo">Save location rule</button>
+        </div>
+        <p class="muted" style="margin-top:.4rem">The university admin currently ${
+          a.ip_enabled && a.ip_mode === "selected" ? `allows only ${a.rules.filter((r) => Number(r.active)).length} IP address(es)` : "allows all IP addresses"
+        }.</p>`;
+      geoBox.querySelector("#saveGeo").onclick = async () => {
+        try {
+          const out = await api(`/api/owner/tenants/${id}/access`, {
+            method: "PUT",
+            body: {
+              geo_enabled: geoBox.querySelector("#g_on").checked,
+              geo_countries: geoBox.querySelector("#g_country").value,
+              geo_states: geoBox.querySelector("#g_state").value,
+              geo_cities: geoBox.querySelector("#g_city").value,
+              geo_note: geoBox.querySelector("#g_note").value,
+              geo_allow_private: geoBox.querySelector("#g_priv").checked,
+              geo_fail_open: geoBox.querySelector("#g_open").checked,
+            },
+          });
+          toast("Location rule saved");
+          paintGeo(out.access);
+        } catch (e) {
+          toast(e.message, true);
+        }
+      };
+    };
+    api(`/api/owner/tenants/${id}/access`)
+      .then((r) => paintGeo(r.access))
+      .catch((e) => (geoBox.textContent = e.message));
+
     dlg.showModal();
   };
 

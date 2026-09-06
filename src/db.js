@@ -74,7 +74,7 @@ export async function ensureSchemaExtras() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
 
   // Platform (owner) tables + Master Setting (sublibrary access) tables.
-  for (const file of ["platform.sql", "access.sql", "display.sql", "kiosk-sessions.sql"]) {
+  for (const file of ["platform.sql", "access.sql", "display.sql", "kiosk-sessions.sql", "access-control.sql"]) {
     const sql = await readFile(path.join(dir, "..", "db", file), "utf8");
     for (const stmt of sql.split(/;\s*\n/)) {
       // Drop comment lines so a leading comment block never hides the statement.
@@ -98,7 +98,72 @@ export async function ensureSchemaExtras() {
     PRIMARY KEY (user_id, institute_id, pref_key)
   )`);
 
+  // Estimates / quotations prepared before an invoice is raised. They stay
+  // editable until the owner converts one into a payment (invoice).
+  await pool.query(`CREATE TABLE IF NOT EXISTS estimates (
+    id CHAR(36) PRIMARY KEY,
+    institute_id CHAR(36) NOT NULL,
+    estimate_no VARCHAR(40) NOT NULL,
+    description TEXT NULL,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    tax_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    tax_breakup TEXT NULL,
+    valid_until DATE NULL,
+    notes TEXT NULL,
+    status ENUM('Draft','Sent','Converted','Cancelled') NOT NULL DEFAULT 'Draft',
+    payment_id CHAR(36) NULL,
+    created_by VARCHAR(190) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_estimate_no (estimate_no),
+    INDEX (institute_id)
+  )`);
+
+  // One-time email codes used as the fallback for two-factor sign-in.
+  await pool.query(`CREATE TABLE IF NOT EXISTS login_otps (
+    id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX (user_id),
+    INDEX (code_hash)
+  )`);
+
+  // Align helper-table collations with the core `institutes` table. Servers with
+  // different MySQL defaults (utf8mb4_unicode_ci vs utf8mb4_uca1400_ai_ci) would
+  // otherwise fail JOINs with "Illegal mix of collations".
+  const baseCollation = await one(
+    `SELECT table_collation AS c FROM information_schema.tables
+      WHERE table_schema = DATABASE() AND table_name = 'institutes'`,
+  );
+  if (baseCollation?.c) {
+    const charset = String(baseCollation.c).split("_")[0];
+    for (const t of ["user_preferences", "estimates", "login_otps"]) {
+      const row = await one(
+        `SELECT table_collation AS c FROM information_schema.tables
+          WHERE table_schema = DATABASE() AND table_name = ?`,
+        [t],
+      );
+      if (row && row.c !== baseCollation.c) {
+        await pool.query(`ALTER TABLE \`${t}\` CONVERT TO CHARACTER SET ${charset} COLLATE ${baseCollation.c}`);
+      }
+    }
+  }
+
   const extras = [
+    // Google Authenticator (TOTP) two-factor, optional per login.
+    ["users", "totp_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
+    ["users", "totp_secret", "TEXT NULL"],
+    ["users", "totp_pending", "TEXT NULL"],
+    // Alternative second factors: emailed one-time code and face authentication.
+    ["users", "email_2fa_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
+    ["users", "face_2fa_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
+    ["users", "face_descriptor", "LONGTEXT NULL"],
+
+
     ["kiosk_settings", "theme", "ENUM('dark','light') NOT NULL DEFAULT 'light'"],
     ["kiosk_settings", "custom_css", "TEXT NULL"],
     ["kiosk_settings", "kiosk_template", "VARCHAR(40) NOT NULL DEFAULT 'classic'"],
@@ -116,6 +181,12 @@ export async function ensureSchemaExtras() {
     ["kiosk_settings", "display_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["kiosk_settings", "display_idle_seconds", "INT NOT NULL DEFAULT 30"],
     ["kiosk_settings", "display_slide_seconds", "INT NOT NULL DEFAULT 10"],
+    // Instructional line shown over/below the library-activities idle screen.
+    ["kiosk_settings", "display_hint_enabled", "TINYINT(1) NOT NULL DEFAULT 1"],
+    ["kiosk_settings", "display_hint_text", "VARCHAR(300) NOT NULL DEFAULT 'Touch the screen to make an entry'"],
+    // Per-kiosk overrides; NULL means "use the institute default above".
+    ["kiosk_devices", "display_hint_enabled", "TINYINT(1) NULL"],
+    ["kiosk_devices", "display_hint_text", "VARCHAR(300) NULL"],
     ["institutes", "code", "VARCHAR(40) NULL"],
     ["institutes", "plan_id", "CHAR(36) NULL"],
     ["institutes", "status", "ENUM('Active','Suspended','Deactivated') NOT NULL DEFAULT 'Active'"],
@@ -130,6 +201,8 @@ export async function ensureSchemaExtras() {
     ["bulk_import_logs", "duplicate_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "updated_count", "INT NOT NULL DEFAULT 0"],
     ["bulk_import_logs", "skipped_count", "INT NOT NULL DEFAULT 0"],
+    // GST breakdown (SGST / CGST / IGST) saved with each invoice.
+    ["payments", "tax_breakup", "TEXT NULL"],
   ];
 
 

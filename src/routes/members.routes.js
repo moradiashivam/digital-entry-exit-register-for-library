@@ -62,8 +62,22 @@ router.get("/", withInstitute(canViewReports), requireModule("members"), async (
     sql += " AND m.status = ?";
     params.push(status);
   }
-  sql += " ORDER BY m.full_name LIMIT 1000";
-  res.json(await q(sql, params));
+  sql += " ORDER BY m.full_name";
+  if (req.query.limit != null) {
+    // Paged mode: return { rows, total } so the UI can offer 50/100/500/1000/5000 pages.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 5000);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const offset = (page - 1) * limit;
+    const [{ total }] = await q(
+      `SELECT COUNT(*) AS total FROM members m
+       WHERE m.institute_id = ? AND (m.full_name LIKE ? OR m.member_code LIKE ? OR m.email LIKE ?)` +
+        (status ? " AND m.status = ?" : ""),
+      params,
+    );
+    const rows = await q(`${sql} LIMIT ${limit} OFFSET ${offset}`, params);
+    return res.json({ rows, total, page, limit });
+  }
+  res.json(await q(`${sql} LIMIT 1000`, params));
 });
 
 /** Only member code, name and the validity window are mandatory. */

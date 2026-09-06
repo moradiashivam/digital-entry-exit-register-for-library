@@ -28,6 +28,10 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
             <select id="status"><option value="">All</option>
               ${["Active", "Inactive", "Expired", "Blocked"].map((s) => `<option>${s}</option>`).join("")}
             </select></div>
+          <div><label for="pageSize">Show</label>
+            <select id="pageSize">
+              ${[50, 100, 500, 1000, 5000].map((n) => `<option value="${n}">${n} members</option>`).join("")}
+            </select></div>
         </div>
         <div class="row">
           <button class="ghost" id="export">Export CSV</button>
@@ -39,6 +43,11 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
         <thead><tr><th style="width:32px"><input type="checkbox" id="selectAll" aria-label="Select all members" /></th><th>Code</th><th>Name</th><th>Course / Dept</th><th>Contact</th><th>Validity</th><th>Palm</th><th>Status</th><th></th></tr></thead>
         <tbody id="tbody"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
       </table></div>
+      <div class="row" id="pager" style="justify-content:flex-end;margin-top:.6rem;gap:.5rem">
+        <button class="ghost" id="prevPage">‹ Prev</button>
+        <span class="muted" id="pageInfo"></span>
+        <button class="ghost" id="nextPage">Next ›</button>
+      </div>
     </div>
 
     <dialog id="dlg">
@@ -75,12 +84,26 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
   const dlg = view.querySelector("#dlg");
   let editing = null;
 
+  let page = 1;
+  let total = 0;
+
   const load = async () => {
+    const limit = parseInt(view.querySelector("#pageSize").value, 10) || 50;
     const params = new URLSearchParams({
       search: view.querySelector("#search").value,
       status: view.querySelector("#status").value,
+      limit: String(limit),
+      page: String(page),
     });
-    rows = (await api(`/api/members?${params}`)) || [];
+    const out = (await api(`/api/members?${params}`)) || {};
+    rows = out.rows || [];
+    total = out.total || 0;
+    const pages = Math.max(1, Math.ceil(total / limit));
+    if (page > pages) { page = pages; return load(); }
+    const info = view.querySelector("#pageInfo");
+    info.textContent = total ? `Page ${page} of ${pages} · ${total} members` : "No members";
+    view.querySelector("#prevPage").disabled = page <= 1;
+    view.querySelector("#nextPage").disabled = page >= pages;
     tbody.innerHTML = rows.length
       ? rows.map((m) => `<tr>
           <td><input type="checkbox" class="rowSel" data-sel="${esc(m.id)}" aria-label="Select ${esc(m.full_name)}" /></td>
@@ -140,8 +163,11 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
 
   view.querySelector("#add").onclick = () => openDialog(null);
   view.querySelector("#cancel").onclick = () => dlg.close();
-  view.querySelector("#search").oninput = () => load();
-  view.querySelector("#status").onchange = () => load();
+  view.querySelector("#search").oninput = () => { page = 1; load(); };
+  view.querySelector("#status").onchange = () => { page = 1; load(); };
+  view.querySelector("#pageSize").onchange = () => { page = 1; load(); };
+  view.querySelector("#prevPage").onclick = () => { if (page > 1) { page--; load(); } };
+  view.querySelector("#nextPage").onclick = () => { page++; load(); };
   view.querySelector("#export").onclick = () =>
     downloadCsv("members.csv", rows.map((m) => ({
       code: m.member_code, name: m.full_name, course: m.course, department: m.department, designation: m.designation,
