@@ -60,6 +60,22 @@ mysqldump -u root -p library_register > backup-YYYYMMDD.sql
 mysql -u root -p library_register < backup-YYYYMMDD.sql
 ```
 
+## 6b. Country access restriction
+
+Owner Settings has a **Country access restriction** panel that decides in which countries the
+application may be used at all.
+
+1. Tick **Enable country restriction**.
+2. Choose the rule — *Block the selected countries* or *Allow only the selected countries*.
+3. Search and tick the countries, then save. You can change the list at any time.
+4. Edit the **Access denied message** shown to anyone from a restricted country.
+5. Two safety switches: allow computers on a local network (no public location) and allow requests
+   when the visitor's location cannot be detected.
+
+Signed-in platform owners and the owner console are never blocked, so a wrong setting can always be
+undone. Location is detected from the visitor's IP address; set `GEOIP_URL` in `.env` to use a
+different lookup service.
+
 ## 7. Troubleshooting
 
 | Symptom | Fix |

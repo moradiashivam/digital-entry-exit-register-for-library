@@ -78,7 +78,7 @@ const PAGE_MODULE = {
   members: "members",
   masters: "master_data",
   import: "members",
-  face: "members",
+  face: "face_id",
   reports: "reports",
   audit: "audit",
   settings: "kiosks",

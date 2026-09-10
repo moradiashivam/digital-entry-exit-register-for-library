@@ -20,6 +20,7 @@ export const MODULES = [
   { key: "entry_exit", label: "Entry / exit register" },
   { key: "reports", label: "Reports" },
   { key: "kiosks", label: "Kiosk settings" },
+  { key: "face_id", label: "Face ID (facial recognition enrolment)" },
   { key: "master_data", label: "Master data (courses, departments, years)" },
   { key: "master_setting", label: "Master setting (users & sublibraries)" },
   { key: "audit", label: "Audit trail" },
@@ -35,7 +36,7 @@ export const ADMIN_ROLES = ["super_admin"];
 export const ROLE_PRESETS = {
   super_admin: { label: "University administrator", modules: MODULE_KEYS, viewer_only: 0, allow_bulk_upload: 1, allow_export: 1 },
   librarian: { label: "Library manager", modules: MODULE_KEYS.filter((m) => m !== "master_setting"), viewer_only: 0, allow_bulk_upload: 1, allow_export: 1 },
-  sublibrary_admin: { label: "Sublibrary administrator", modules: ["dashboard", "members", "entry_exit", "reports", "kiosks"], viewer_only: 0, allow_bulk_upload: 1, allow_export: 1 },
+  sublibrary_admin: { label: "Sublibrary administrator", modules: ["dashboard", "members", "entry_exit", "reports", "kiosks", "face_id"], viewer_only: 0, allow_bulk_upload: 1, allow_export: 1 },
   operator: { label: "Kiosk operator", modules: ["dashboard", "entry_exit"], viewer_only: 0, allow_bulk_upload: 0, allow_export: 0 },
   report_viewer: { label: "Report viewer", modules: ["dashboard", "reports"], viewer_only: 1, allow_bulk_upload: 0, allow_export: 1 },
   viewer: { label: "Viewer only", modules: ["dashboard"], viewer_only: 1, allow_bulk_upload: 0, allow_export: 0 },

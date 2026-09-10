@@ -239,6 +239,12 @@ body.light .chart-bar { background: linear-gradient(180deg, var(--brand), #7aa2f
 .chart-col:hover .chart-bar { filter: brightness(1.2); }
 .chart-labels { display: flex; gap: 3px; font-size: .68rem; color: var(--muted); }
 .chart-labels span { flex: 1; text-align: center; white-space: nowrap; }
+.line-chart { width: 100%; height: 220px; margin-top: .8rem; display: block; }
+.line-grid { stroke: var(--line, rgba(140, 150, 170, .25)); stroke-width: 1; }
+.line-tick { font-size: 11px; fill: var(--muted); }
+.line-path { stroke: var(--brand); stroke-width: 2.5; }
+.line-dot { fill: var(--brand); cursor: pointer; }
+.line-dot:hover { r: 5; }
 
 /* ---------- appearance picker ---------- */
 .appearance .accent-grid {
@@ -498,6 +504,22 @@ body.light .kiosk-idle { background: #f1f5f9; color: #0f172a; }
 .kiosk-idle-dots { display: flex; gap: .4rem; justify-content: center; margin-top: .8rem; }
 .kiosk-idle-dots span { width: 9px; height: 9px; border-radius: 50%; background: currentColor; opacity: .3; }
 .kiosk-idle-dots span.on { opacity: .95; }
+
+/* Full-screen slide: photo/video fills the kiosk, no title or description. */
+.kiosk-idle.kd-full { padding: 0; }
+.kiosk-idle.kd-full .kiosk-idle-inner { width: 100%; height: 100%; position: relative; }
+.kiosk-idle.kd-full .kiosk-idle-media { position: absolute; inset: 0; }
+.kiosk-idle.kd-full .kiosk-idle-media img,
+.kiosk-idle.kd-full .kiosk-idle-media video {
+  width: 100%; height: 100%; max-width: none; max-height: none;
+  border-radius: 0; box-shadow: none; object-fit: cover;
+}
+.kiosk-idle.kd-full .kiosk-idle-text { display: none; }
+.kiosk-idle.kd-full .kiosk-idle-hint {
+  position: absolute; left: 0; right: 0; bottom: 3.4rem; margin: 0;
+  color: #fff; text-shadow: 0 1px 8px rgba(0, 0, 0, .8); opacity: .95;
+}
+.kiosk-idle.kd-full .kiosk-idle-dots { position: absolute; left: 0; right: 0; bottom: 1.4rem; color: #fff; }
 
 /* ---- Invoice generator dialog (Owner → Payments & accounting) ---- */
 .modal-back {

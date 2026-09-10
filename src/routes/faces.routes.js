@@ -21,7 +21,7 @@ const parseDescriptor = (raw) => {
 };
 
 /** Members of this university with their photo and face-enrolment status. */
-router.get("/", withInstitute(isMember), requireModule("members"), async (req, res) => {
+router.get("/", withInstitute(isMember), requireModule("face_id"), async (req, res) => {
   const search = String(req.query.search || "").trim();
   const args = [req.institute.id];
   let where = "m.institute_id = ?";
@@ -43,7 +43,7 @@ res.json(rows);
 });
 
 /** Counts for the Face ID summary box (active members with face, totals). */
-router.get("/stats", withInstitute(isMember), requireModule("members"), async (req, res) => {
+router.get("/stats", withInstitute(isMember), requireModule("face_id"), async (req, res) => {
   const [faces, active] = await Promise.all([
     one(
       `SELECT COUNT(*) AS total, SUM(m.status = 'Active') AS active_count
@@ -64,7 +64,7 @@ router.get("/stats", withInstitute(isMember), requireModule("members"), async (r
 });
 
 /** Save (or replace) one member's face descriptor. */
-router.put("/:memberId", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
+router.put("/:memberId", withInstitute(), requireModule("face_id"), requireWrite, async (req, res) => {
   const descriptor = parseDescriptor(req.body?.descriptor);
   if (!descriptor) return res.status(400).json({ error: "A 128-value face descriptor is required" });
   const member = await one("SELECT id, member_code FROM members WHERE id = ? AND institute_id = ?", [
@@ -87,7 +87,7 @@ router.put("/:memberId", withInstitute(), requireModule("members"), requireWrite
 });
 
 /** Remove one member's face. */
-router.delete("/:memberId", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
+router.delete("/:memberId", withInstitute(), requireModule("face_id"), requireWrite, async (req, res) => {
   await q("DELETE FROM face_templates WHERE member_id = ? AND institute_id = ?", [
     req.params.memberId, req.institute.id,
   ]);
@@ -96,7 +96,7 @@ router.delete("/:memberId", withInstitute(), requireModule("members"), requireWr
 });
 
 /** Remove every enrolled face of the university. */
-router.post("/clear", withInstitute(), requireModule("members"), requireWrite, async (req, res) => {
+router.post("/clear", withInstitute(), requireModule("face_id"), requireWrite, async (req, res) => {
   await q("DELETE FROM face_templates WHERE institute_id = ?", [req.institute.id]);
   await logAudit(req, req.institute.id, "face.clear_all", "face_templates", req.institute.id, {});
   res.json({ ok: true });

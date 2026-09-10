@@ -6,6 +6,7 @@ import { encrypt } from "../crypto.js";
 import { sendMailWith } from "../mailer.js";
 import { runExpiryJob } from "../jobs.js";
 import { getAccessConfig, saveGeoConfig } from "../net-access.js";
+import { COUNTRIES, getGeoBlock, saveGeoBlock, checkCountry, DEFAULT_GEO_BLOCK_MESSAGE } from "../geo-block.js";
 import { SEO_KEYS, SEO_PAGES, getSeoSettings, baseUrl, robotsTxt, sitemapXml, seoAudit, pageMeta } from "../seo.js";
 
 const router = Router();
@@ -259,6 +260,24 @@ router.get("/tenants/:id", async (req, res) => {
       [tenant.id],
     ),
   });
+});
+
+/* --------------- Platform country restriction (all universities) --------------- */
+
+/** Current platform-wide country rule + the list of selectable countries. */
+router.get("/geo-block", async (req, res) => {
+  res.json({
+    geo_block: await getGeoBlock(),
+    countries: COUNTRIES,
+    default_message: DEFAULT_GEO_BLOCK_MESSAGE,
+    your_location: await checkCountry(req).then((v) => ({ ip: v.ip || null, geo: v.geo || null })).catch(() => null),
+  });
+});
+
+router.put("/geo-block", async (req, res) => {
+  const geo_block = await saveGeoBlock(req.body || {});
+  await logAudit(req, null, "platform.geo_block", "platform_settings", null, geo_block);
+  res.json({ geo_block });
 });
 
 /* --------------- University Access Control (geography layer) --------------- */

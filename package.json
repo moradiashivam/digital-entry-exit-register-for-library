@@ -8,7 +8,10 @@
   "scripts": {
     "setup": "node scripts/setup-db.js",
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "graph": "graphify extract . --code-only --no-viz --force && graphify cluster-only . --no-label",
+    "graph:update": "graphify update . --no-cluster",
+    "graph:report": "graphify cluster-only . --no-label"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

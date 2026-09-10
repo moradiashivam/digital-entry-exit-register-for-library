@@ -21,7 +21,7 @@ const blank = () => ({
   id: null, title: "", body: "", category: "General", post_type: "regular",
   media_url: "", media_type: "none", media_data: "",
   start_date: "", end_date: "", start_time: "08:00", end_time: "23:00",
-  is_active: 1, sort_order: 0, kiosks: [],
+  is_active: 1, show_text: 1, sort_order: 0, kiosks: [],
 });
 
 export async function renderKioskDisplay(view, { api, esc, toast }) {
@@ -80,6 +80,10 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
 
         <div><label for="pMedia">Image or video</label><input id="pMedia" type="file" accept="image/*,video/*" /></div>
         <div id="mediaPreview" class="kd-preview"></div>
+        <label style="display:flex;align-items:center;gap:.4rem;font-weight:500;margin-top:.4rem">
+          <input type="checkbox" id="pShowText" checked /> Show title &amp; description on the kiosk
+        </label>
+        <p class="muted" style="margin:.2rem 0 0">Untick this to show the photo or video full screen, without any text over it.</p>
 
         <div style="margin-top:.6rem">
           <label>Show on</label>
@@ -151,6 +155,7 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
     $("#pStartTime").value = (draft.start_time || "08:00").slice(0, 5);
     $("#pEndTime").value = (draft.end_time || "23:00").slice(0, 5);
     $("#pActive").checked = !!Number(draft.is_active);
+    $("#pShowText").checked = !!Number(draft.show_text ?? 1);
     $("#pAllKiosks").checked = !draft.kiosks.length;
     $("#schedule").hidden = draft.post_type !== "occasion";
     paintKioskPick();
@@ -259,6 +264,10 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
       draft.media_data = await fileToDataUrl(file);
       draft.media_type = file.type.startsWith("video/") ? "video" : "image";
       draft.remove_media = false;
+      // A photo or video fills the kiosk screen by default; untick "show text"
+      // so the media is full screen with no title or description over it.
+      $("#pShowText").checked = false;
+      draft.show_text = 0;
       paintMedia();
     } catch (e) { toast(e.message, true); }
   };
@@ -271,6 +280,7 @@ export async function renderKioskDisplay(view, { api, esc, toast }) {
       post_type: $("#pType").value,
       sort_order: Number($("#pOrder").value) || 0,
       is_active: $("#pActive").checked,
+      show_text: $("#pShowText").checked,
       start_date: $("#pStartDate").value,
       end_date: $("#pEndDate").value,
       start_time: $("#pStartTime").value,

@@ -89,6 +89,50 @@ function columnChart(input, { xLabel, axisEvery = 1 }) {
   </div>`;
 }
 
+/** Line chart (SVG) — x-axis = one point per day, y-axis = value. */
+function lineChart(input, { xLabel, axisEvery = 1 }) {
+  const points = arr(input);
+  const max = Math.max(1, ...points.map((p) => Number(p.value) || 0));
+  const W = 560;
+  const H = 200;
+  const padL = 34;
+  const padR = 10;
+  const padT = 12;
+  const padB = 22;
+  const iw = W - padL - padR;
+  const ih = H - padT - padB;
+  const n = points.length;
+  const x = (i) => padL + (n <= 1 ? iw / 2 : (i / (n - 1)) * iw);
+  const y = (v) => padT + ih - (Number(v) / max) * ih;
+  const ticks = [max, Math.round(max * 0.75), Math.round(max * 0.5), Math.round(max * 0.25), 0];
+  const path = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
+  const dots = points
+    .map(
+      (p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" class="line-dot">
+        <title>${p.title}</title></circle>`,
+    )
+    .join("");
+  const grid = ticks
+    .map((t) => {
+      const ty = y(t);
+      return `<line x1="${padL}" y1="${ty}" x2="${W - padR}" y2="${ty}" class="line-grid"></line>
+        <text x="${padL - 6}" y="${ty + 3}" text-anchor="end" class="line-tick">${t}</text>`;
+    })
+    .join("");
+  const labels = points
+    .map((p, i) =>
+      i % axisEvery === 0
+        ? `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="line-tick">${xLabel(p, i)}</text>`
+        : "",
+    )
+    .join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="line-chart" role="img" aria-label="Trend line chart" preserveAspectRatio="none">
+    ${grid}
+    <path d="${path}" class="line-path" fill="none"></path>
+    ${dots}${labels}
+  </svg>`;
+}
+
 export async function renderDashboard(view, { api, esc, fmtDate, toast }) {
   // Library / kiosk filter — a sublibrary user only ever sees their own terminals.
   const filters = { sublibrary_id: "", location: "", device_id: "" };
@@ -274,7 +318,7 @@ export async function renderDashboard(view, { api, esc, fmtDate, toast }) {
         </div>
         <div class="panel">
           <h3>14-day trend</h3>
-          ${columnChart(trend, { xLabel: (p) => shortDay(p.key), axisEvery: 3 })}
+          ${lineChart(trend, { xLabel: (p) => shortDay(p.key), axisEvery: 3 })}
         </div>
       </div>
 

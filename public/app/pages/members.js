@@ -10,7 +10,14 @@ const FORM_FIELDS = [
 
 
 export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
-  const masters = (await api("/api/masters")) || {};
+  // Reference lists are optional — a user without master data rights still
+  // manages members, they simply see empty course / department pickers.
+  let masters = {};
+  try {
+    masters = (await api("/api/masters")) || {};
+  } catch {
+    masters = {};
+  }
   let rows = [];
 
   const options = (list, selected) =>
@@ -87,15 +94,22 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
   let page = 1;
   let total = 0;
 
+  // A barcode reader types very fast: every keystroke used to fire its own
+  // request and a slower earlier reply could land last, showing partial-code
+  // matches. We tag each request and ignore anything that is not the newest.
+  let loadSeq = 0;
+
   const load = async () => {
+    const mySeq = ++loadSeq;
     const limit = parseInt(view.querySelector("#pageSize").value, 10) || 50;
     const params = new URLSearchParams({
-      search: view.querySelector("#search").value,
+      search: view.querySelector("#search").value.trim(),
       status: view.querySelector("#status").value,
       limit: String(limit),
       page: String(page),
     });
     const out = (await api(`/api/members?${params}`)) || {};
+    if (mySeq !== loadSeq) return; // a newer search already went out
     rows = out.rows || [];
     total = out.total || 0;
     const pages = Math.max(1, Math.ceil(total / limit));
@@ -163,7 +177,20 @@ export async function renderMembers(view, { api, esc, toast, downloadCsv }) {
 
   view.querySelector("#add").onclick = () => openDialog(null);
   view.querySelector("#cancel").onclick = () => dlg.close();
-  view.querySelector("#search").oninput = () => { page = 1; load(); };
+  let searchTimer = null;
+  const searchBox = view.querySelector("#search");
+  searchBox.oninput = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { page = 1; load(); }, 250);
+  };
+  // Barcode readers end with Enter — search that value immediately.
+  searchBox.onkeydown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    clearTimeout(searchTimer);
+    page = 1;
+    load();
+  };
   view.querySelector("#status").onchange = () => { page = 1; load(); };
   view.querySelector("#pageSize").onchange = () => { page = 1; load(); };
   view.querySelector("#prevPage").onclick = () => { if (page > 1) { page--; load(); } };

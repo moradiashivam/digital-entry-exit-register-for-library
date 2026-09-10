@@ -9,6 +9,10 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
     const primary = profiles.find((p) => !p.is_fallback) || {};
     const fallback = profiles.find((p) => p.is_fallback) || {};
     const taxes = arr(((await api("/api/owner/tax-rates")) || {}).taxes);
+    const geoData = (await api("/api/owner/geo-block")) || {};
+    const geo = geoData.geo_block || {};
+    const countryList = arr(geoData.countries);
+    const geoPicked = new Set(arr(geo.countries));
 
     const smtpForm = (id, p, label) => `
       <div class="panel" data-smtp="${id}">
@@ -95,7 +99,48 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
         <button id="saveTaxes" style="margin-top:.6rem">Save tax rates</button>
       </div>
 
-
+      <div class="panel" style="margin-top:1rem">
+        <h3 style="margin-top:0">Country access restriction</h3>
+        <p class="muted">Choose the countries where this application may be used. Universities and kiosks in
+          other countries see the message below instead of the application. You can change this at any time —
+          your own owner account is never blocked.</p>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="gbEnabled" ${geo.enabled ? "checked" : ""} />
+            Enable country restriction</label>
+          <div><label for="gbMode">Rule</label>
+            <select id="gbMode">
+              <option value="block" ${geo.mode === "allow" ? "" : "selected"}>Block the selected countries</option>
+              <option value="allow" ${geo.mode === "allow" ? "selected" : ""}>Allow only the selected countries</option>
+            </select></div>
+          <div style="min-width:200px"><label for="gbSearch">Find a country</label>
+            <input id="gbSearch" placeholder="Type to search…" style="width:100%" /></div>
+        </div>
+        <div class="row" style="margin:.4rem 0">
+          <button class="ghost" id="gbClear" type="button">Clear selection</button>
+          <span class="muted" id="gbCount"></span>
+        </div>
+        <div id="gbList" style="max-height:16rem;overflow:auto;border:1px solid var(--line);border-radius:10px;
+             padding:.6rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.25rem">
+          ${countryList.map((c) => `
+            <label class="chk" data-country-name="${esc(c.name.toLowerCase())}">
+              <input type="checkbox" data-country="${esc(c.code)}" ${geoPicked.has(c.code) ? "checked" : ""} />
+              ${esc(c.name)} <span class="muted">(${esc(c.code)})</span>
+            </label>`).join("")}
+        </div>
+        <div class="row" style="margin-top:.6rem">
+          <div style="flex:1;min-width:260px"><label for="gbMsg">Access denied message</label>
+            <textarea id="gbMsg" rows="2" style="width:100%">${esc(geo.message || "")}</textarea></div>
+        </div>
+        <div class="row">
+          <label class="chk"><input type="checkbox" id="gbPrivate" ${geo.allow_private === false ? "" : "checked"} />
+            Allow local network / office computers (no public location)</label>
+          <label class="chk"><input type="checkbox" id="gbFailOpen" ${geo.fail_open === false ? "" : "checked"} />
+            Allow when the location cannot be detected</label>
+        </div>
+        <button id="gbSave" style="margin-top:.6rem">Save country restriction</button>
+        <p class="muted">Your current location: ${esc(geoData.your_location?.geo?.country || "not detected")}
+          ${geoData.your_location?.ip ? `(${esc(geoData.your_location.ip)})` : ""}</p>
+      </div>
 
       <h3 style="margin:1.2rem 0 .4rem">Email (SMTP)</h3>
       ${smtpForm("primary", primary, "Primary SMTP")}
@@ -202,6 +247,47 @@ export async function renderOwnerSettings(view, { api, esc, toast, fmtDate }) {
       try {
         await api("/api/owner/tax-rates", { method: "PUT", body });
         toast("Tax rates saved");
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+
+    /* ---- Country access restriction ---- */
+    const gbBoxes = () => [...view.querySelectorAll("[data-country]")];
+    const gbCount = view.querySelector("#gbCount");
+    const gbRefresh = () => {
+      const n = gbBoxes().filter((b) => b.checked).length;
+      gbCount.textContent = n ? `${n} country${n === 1 ? "" : "ies"} selected` : "No countries selected";
+    };
+    gbRefresh();
+    view.querySelector("#gbList").addEventListener("change", gbRefresh);
+    view.querySelector("#gbSearch").oninput = (e) => {
+      const term = e.target.value.trim().toLowerCase();
+      for (const label of view.querySelectorAll("[data-country-name]")) {
+        label.style.display = !term || label.dataset.countryName.includes(term) ? "" : "none";
+      }
+    };
+    view.querySelector("#gbClear").onclick = () => {
+      gbBoxes().forEach((b) => { b.checked = false; });
+      gbRefresh();
+    };
+    view.querySelector("#gbSave").onclick = async () => {
+      const countries = gbBoxes().filter((b) => b.checked).map((b) => b.dataset.country);
+      const enabled = view.querySelector("#gbEnabled").checked;
+      if (enabled && !countries.length) return toast("Select at least one country first", true);
+      try {
+        await api("/api/owner/geo-block", {
+          method: "PUT",
+          body: {
+            enabled,
+            mode: view.querySelector("#gbMode").value,
+            countries,
+            message: view.querySelector("#gbMsg").value,
+            allow_private: view.querySelector("#gbPrivate").checked,
+            fail_open: view.querySelector("#gbFailOpen").checked,
+          },
+        });
+        toast("Country restriction saved");
       } catch (e) {
         toast(e.message, true);
       }

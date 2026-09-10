@@ -187,6 +187,8 @@ export async function ensureSchemaExtras() {
     // Per-kiosk overrides; NULL means "use the institute default above".
     ["kiosk_devices", "display_hint_enabled", "TINYINT(1) NULL"],
     ["kiosk_devices", "display_hint_text", "VARCHAR(300) NULL"],
+    // Per post: 0 = show the photo/video full screen without title & description.
+    ["kiosk_posts", "show_text", "TINYINT(1) NOT NULL DEFAULT 1"],
     ["institutes", "code", "VARCHAR(40) NULL"],
     ["institutes", "plan_id", "CHAR(36) NULL"],
     ["institutes", "status", "ENUM('Active','Suspended','Deactivated') NOT NULL DEFAULT 'Active'"],

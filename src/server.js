@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { pool, ensureSchemaExtras } from "./db.js";
 import { loadUser } from "./auth.js";
+import { countryGuard } from "./geo-block.js";
 import authRoutes from "./routes/auth.routes.js";
 import instituteRoutes from "./routes/institutes.routes.js";
 import memberRoutes from "./routes/members.routes.js";
@@ -27,9 +28,35 @@ import { renderPublicPage, getSeoSettings, robotsTxt, sitemapXml, baseUrl } from
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 
+// Express 4 does NOT forward rejected promises from async route handlers —
+// a database timeout (e.g. connect ETIMEDOUT) would otherwise become an
+// unhandled rejection and kill the whole process. Patch the Router so every
+// async handler's errors flow to the error middleware instead.
+{
+  const wrap = (fn) =>
+    typeof fn !== "function" || fn.length >= 4
+      ? fn
+      : function (req, res, next) {
+          Promise.resolve(fn.call(this, req, res, next)).catch(next);
+        };
+  for (const method of ["get", "post", "put", "patch", "delete", "all", "use"]) {
+    const original = express.Router[method];
+    express.Router[method] = function (path, ...handlers) {
+      return original.call(this, path, ...handlers.map(wrap));
+    };
+  }
+}
+
+// Last-resort safety net: log unexpected rejections, never crash the kiosk PC.
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection (kept running):", err?.message || err);
+});
+
 app.use(cors());
 app.use(express.json({ limit: "220mb" }));
 app.use(loadUser);
+// Platform-wide country restriction set by the owner (disabled by default).
+app.use(countryGuard);
 
 app.get("/api/health", async (_req, res) => {
   try {
@@ -97,6 +124,14 @@ app.use("/api", (_req, res) => res.status(404).json({ error: "Unknown API endpoi
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
   console.error(err);
+  const dbDown = ["ETIMEDOUT", "ECONNREFUSED", "ECONNRESET", "PROTOCOL_CONNECTION_LOST"].includes(
+    String(err?.code || ""),
+  );
+  if (dbDown) {
+    return res.status(503).json({
+      error: "Database is not reachable right now. Check that MySQL is running, then try again.",
+    });
+  }
   const status = err.status || err.statusCode || 500;
   res.status(status).json({ error: err.message || "Server error" });
 });

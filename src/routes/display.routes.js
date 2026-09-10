@@ -103,6 +103,7 @@ async function readBody(req) {
     category: clean(body.category, 60) || "General",
     post_type: body.post_type === "occasion" ? "occasion" : "regular",
     is_active: body.is_active === undefined || body.is_active ? 1 : 0,
+    show_text: body.show_text === undefined || body.show_text ? 1 : 0,
     sort_order: Math.max(0, Math.min(9999, Number(body.sort_order) || 0)),
     start_date: null, end_date: null, start_time: null, end_time: null,
     media_type: "none", media_url: null,
@@ -209,5 +210,6 @@ export async function activePostsFor(instituteId, deviceId) {
     post_type: p.post_type,
     media_type: p.media_type,
     media_url: p.media_url,
+    show_text: Number(p.show_text ?? 1),
   }));
 }

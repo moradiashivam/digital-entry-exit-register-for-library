@@ -8,8 +8,13 @@ router.use(requireAuth);
 
 const TABLES = { courses: "courses", departments: "departments", years: "academic_years" };
 
-/** Courses, departments and academic years for the active university. */
-router.get("/", withInstitute(isMember), requireModule("master_data"), async (req, res) => {
+/**
+ * Courses, departments and academic years for the active university.
+ * Read-only reference data: anyone who may open Members, Reports or Import
+ * needs these lists, so it is not limited to the Master data module.
+ * Creating / editing / deleting below still needs `master_data`.
+ */
+router.get("/", withInstitute(isMember), async (req, res) => {
   const [courses, departments, years] = await Promise.all([
     q("SELECT id, name, code FROM courses WHERE institute_id = ? ORDER BY code, name", [req.institute.id]),
     q("SELECT id, name, code FROM departments WHERE institute_id = ? ORDER BY code, name", [req.institute.id]),

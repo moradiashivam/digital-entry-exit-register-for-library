@@ -275,6 +275,11 @@ async function loadIdlePosts() {
 function paintIdleSlide() {
   const post = idlePosts[idleIndex];
   if (!post) return hideIdle();
+  const box = el("idleShow");
+  // A post with a photo/video and "show text" off goes full screen — no title,
+  // category or description over the media.
+  const fullScreen = !!post.media_url && !Number(post.show_text ?? 1);
+  if (box) box.classList.toggle("kd-full", fullScreen);
   const media = el("idleMedia");
   if (media) {
     media.innerHTML = post.media_url
@@ -283,9 +288,9 @@ function paintIdleSlide() {
         : `<img src="${esc(post.media_url)}" alt="${esc(post.title)}" />`)
       : "";
   }
-  el("idleCategory").textContent = post.category || "";
-  el("idleTitle").textContent = post.title || "";
-  el("idleBody").textContent = post.body || "";
+  el("idleCategory").textContent = fullScreen ? "" : (post.category || "");
+  el("idleTitle").textContent = fullScreen ? "" : (post.title || "");
+  el("idleBody").textContent = fullScreen ? "" : (post.body || "");
   // Instructional line (e.g. "Touch the screen to make an entry") — optional,
   // customizable per university and per kiosk; hidden entirely when switched off.
   const hint = el("idleHint");
@@ -318,7 +323,7 @@ function hideIdle() {
   if (!idleShowing) return;
   idleShowing = false;
   const box = el("idleShow");
-  if (box) { box.hidden = true; box.setAttribute("aria-hidden", "true"); }
+  if (box) { box.hidden = true; box.setAttribute("aria-hidden", "true"); box.classList.remove("kd-full"); }
   const media = el("idleMedia");
   if (media) media.innerHTML = "";
 }

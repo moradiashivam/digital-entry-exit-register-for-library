@@ -92,7 +92,8 @@ export function validIpRule(value) {
 const geoCache = new Map(); // ip -> { at, geo }
 const GEO_TTL = Number(process.env.GEOIP_TTL_MS || 6 * 60 * 60 * 1000);
 const GEO_TIMEOUT = Number(process.env.GEOIP_TIMEOUT_MS || 4000);
-const GEO_URL = process.env.GEOIP_URL || "http://ip-api.com/json/{ip}?fields=status,country,regionName,city,query";
+const GEO_URL = process.env.GEOIP_URL
+  || "http://ip-api.com/json/{ip}?fields=status,country,countryCode,regionName,city,query";
 
 export async function lookupGeo(ip) {
   if (!ip || isPrivateIp(ip)) return { private: true };
@@ -104,7 +105,12 @@ export async function lookupGeo(ip) {
     const resp = await fetch(GEO_URL.replace("{ip}", encodeURIComponent(ip)), { signal: controller.signal });
     const data = await resp.json();
     const geo = data && (data.status === "success" || data.country)
-      ? { country: data.country || "", state: data.regionName || data.region || "", city: data.city || "" }
+      ? {
+        country: data.country || "",
+        country_code: String(data.countryCode || data.country_code || "").toUpperCase(),
+        state: data.regionName || data.region || "",
+        city: data.city || "",
+      }
       : { failed: true };
     geoCache.set(ip, { at: Date.now(), geo });
     return geo;
