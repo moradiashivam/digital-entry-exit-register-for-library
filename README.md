@@ -181,6 +181,35 @@ C++ bridge (see `kiosk-bridge/`).
 
 ## Quick start (Linux / macOS)
 
+### One-step install (Ubuntu / Debian)
+
+> **All-in-one download & install guide:** <https://github.com/moradiashivam/digital-entry-exit-register-for-library#quick-start-linux-macos>
+
+Everything below — prerequisites, download, database setup and run — is also
+documented at the single link above, which always matches the latest release.
+
+```bash
+# 1. Install Node.js 18+ and MySQL 8 (Ubuntu / Debian)
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs mysql-server
+
+# 2. Secure MySQL and start it
+sudo systemctl start mysql
+sudo mysql_secure_installation
+
+# 3. Download the app
+git clone https://github.com/moradiashivam/digital-entry-exit-register-for-library.git
+cd digital-entry-exit-register-for-library/mysql-app
+
+# 4. Configure, install, and run
+cp .env.example .env    # then edit it (see Configuration below)
+npm install
+npm run setup           # creates database, tables and owner account
+npm start               # serves on http://localhost:4000
+```
+
+### Other Linux / macOS
+
 ```bash
 cd mysql-app
 cp .env.example .env    # then edit it (see below)
@@ -196,7 +225,6 @@ npm run dev
 ```
 
 ---
-
 ## Configuration (.env)
 
 Copy `.env.example` to `.env` and edit before the first `setup` run:
