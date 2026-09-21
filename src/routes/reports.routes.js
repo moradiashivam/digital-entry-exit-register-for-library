@@ -169,7 +169,7 @@ router.get("/dashboard", withInstitute(canViewReports), requireModule("dashboard
     photo_url: v.photo_url,
     entry_at: v.entry_at,
     minutes: Math.max(0, v.mins_ago),
-  })).sort((a, b) => b.minutes - a.minutes);
+  })).sort((a, b) => String(b.entry_at).localeCompare(String(a.entry_at)));
 
   const busiest = hourly.reduce((best, h) => (h.entries > (best?.entries ?? -1) ? h : best), null);
   const toList = (obj) => Object.entries(obj).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);

@@ -1,9 +1,11 @@
-import "dotenv/config";
+import "./env.js";
+import { IS_EXE, DATA_ROOT, moduleDir } from "./runtime-paths.js";
+import fs from "node:fs";
 import express from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { pool, ensureSchemaExtras } from "./db.js";
+import { ensureSchemaExtras } from "./db.js";
 import { loadUser } from "./auth.js";
 import { countryGuard } from "./geo-block.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -21,11 +23,17 @@ import backupRoutes from "./routes/backup.routes.js";
 import updateRoutes from "./routes/update.routes.js";
 import displayRoutes from "./routes/display.routes.js";
 import kioskSessionRoutes from "./routes/kiosk-sessions.routes.js";
+import ticketRoutes from "./routes/tickets.routes.js";
+import setupRoutes from "./routes/setup.routes.js";
+import healthRoutes from "./routes/health.routes.js";
+import apiV1Routes from "./routes/api-v1.routes.js";
+import apiKeyRoutes from "./routes/api-keys.routes.js";
+import { setupComplete, refreshSetupState } from "./setup.js";
 import { startScheduler } from "./jobs.js";
 import { renderPublicPage, getSeoSettings, robotsTxt, sitemapXml, baseUrl } from "./seo.js";
 
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = moduleDir(import.meta.url);
 const app = express();
 
 // Express 4 does NOT forward rejected promises from async route handlers —
@@ -58,13 +66,29 @@ app.use(loadUser);
 // Platform-wide country restriction set by the owner (disabled by default).
 app.use(countryGuard);
 
-app.get("/api/health", async (_req, res) => {
-  try {
-    await pool.query("SELECT 1");
-    res.json({ ok: true, database: process.env.DB_NAME });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+/* ---- First run: no database details yet, or they no longer work ---- */
+app.use("/api/setup", setupRoutes);
+// Health status stays open and works even while the database is unreachable.
+app.use("/api/health", healthRoutes);
+app.get("/setup", (_req, res) =>
+  res.sendFile(path.join(__dirname, "..", "public", "setup.html")));
+
+// The sign-in page stays reachable even while the database is unreachable, so
+// the owner sees a clear "database not connected" notice with a repair button
+// instead of a blank redirect.
+const SETUP_SAFE = /^\/(setup|health|login|app\/|styles\.css|site\.css|favicon|assets\/|uploads\/|photos\/)/;
+app.use(async (req, res, next) => {
+  if (setupComplete() || SETUP_SAFE.test(req.path)) return next();
+  const state = await refreshSetupState();
+  if (state.complete) return next();
+  if (req.path.startsWith("/api")) {
+    return res.status(503).json({
+      setup: true,
+      error: "The database is not set up yet — open /setup to finish the setup wizard.",
+    });
   }
+  if (req.method === "GET" && req.accepts("html")) return res.redirect("/setup");
+  next();
 });
 
 app.use("/api/public", publicRoutes);
@@ -82,6 +106,9 @@ app.use("/api/backup", backupRoutes);
 app.use("/api/update", updateRoutes);
 app.use("/api/display", displayRoutes);
 app.use("/api/kiosk-devices", kioskSessionRoutes);
+app.use("/api/tickets", ticketRoutes);
+app.use("/api/api-keys", apiKeyRoutes);
+app.use("/api/v1", apiV1Routes);
 
 
 /* ---- Public marketing pages: SEO tags injected server-side ---- */
@@ -98,6 +125,10 @@ const seoPage = (routes, page, file) =>
 seoPage(["/", "/index.html"], "home", "index.html");
 seoPage(["/contact", "/contact.html"], "contact", "contact.html");
 seoPage("/docs.html", "docs", "docs.html");
+app.get(["/health", "/health.html"], (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.sendFile(path.join(__dirname, "..", "public", "health.html"));
+});
 seoPage("/developer.html", "developer", "developer.html");
 
 app.get("/robots.txt", async (req, res) => {
@@ -109,6 +140,15 @@ app.get("/sitemap.xml", async (req, res) => {
   res.type("application/xml").send(sitemapXml(s, baseUrl(s, req)));
 });
 
+// Packaged exe: photos and uploads live in a writable folder next to the exe,
+// so serve that folder first and fall back to the files inside the exe.
+if (IS_EXE) {
+  const writablePublic = path.join(DATA_ROOT, "public");
+  for (const sub of ["uploads", "photos"]) {
+    fs.mkdirSync(path.join(writablePublic, sub), { recursive: true });
+  }
+  app.use(express.static(writablePublic));
+}
 app.use(express.static(publicDir));
 app.get("/kiosk/:slug", (_req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
@@ -137,13 +177,27 @@ app.use((err, _req, res, _next) => {
 });
 
 
-await ensureSchemaExtras().catch((e) => console.error("Schema upgrade skipped:", e.message));
-startScheduler();
+async function boot() {
+  const bootState = await refreshSetupState();
+  if (bootState.complete) {
+    await ensureSchemaExtras().catch((e) => console.error("Schema upgrade skipped:", e.message));
+    startScheduler();
+  } else {
+    console.log(`\n  Database not ready (${bootState.step}) — the setup wizard will open at /setup`);
+    if (bootState.message) console.log(`  ${bootState.message}`);
+  }
 
-
-const port = Number(process.env.PORT || 4000);
-app.listen(port, () => {
-  console.log(`\n  Library Register (MySQL) running`);
-  console.log(`  Admin  : http://localhost:${port}/admin`);
-  console.log(`  Kiosk  : http://localhost:${port}/kiosk/<university-link>\n`);
-});
+  const port = Number(process.env.PORT || 4000);
+  app.listen(port, () => {
+    console.log(`\n  Library Register (MySQL) running`);
+    console.log(`  Admin  : http://localhost:${port}/admin`);
+    console.log(`  Kiosk  : http://localhost:${port}/kiosk/<university-link>\n`);
+    // Packaged exe on Windows: open the app in the default browser.
+    if (IS_EXE && process.platform === "win32") {
+      import("node:child_process")
+        .then(({ exec }) => exec(`start http://localhost:${port}/login`))
+        .catch(() => {});
+    }
+  });
+}
+boot();

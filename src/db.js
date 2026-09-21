@@ -1,6 +1,7 @@
+import { moduleDir } from "./runtime-paths.js";
 import mysql from "mysql2/promise";
 import { randomUUID, randomBytes } from "node:crypto";
-import "dotenv/config";
+import "./env.js";
 
 /** "+05:30" style offset of the computer running Node, for MySQL's session clock. */
 function localOffset(date = new Date()) {
@@ -11,27 +12,67 @@ function localOffset(date = new Date()) {
   return `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
 }
 
-export const pool = mysql.createPool({
-  host: process.env.DB_HOST || "127.0.0.1",
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "library_register",
-  waitForConnections: true,
-  connectionLimit: 10,
-  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
-  dateStrings: true,
-  timezone: "local",
-});
+/** Connection details currently in use (from .env, or the setup wizard). */
+export function dbConfig() {
+  return {
+    host: process.env.DB_HOST || "127.0.0.1",
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "library_register",
+    ssl: String(process.env.DB_SSL || "") === "true" ? { rejectUnauthorized: false } : undefined,
+  };
+}
 
-/**
- * Keep MySQL's clock (NOW(), CURDATE(), CURRENT_TIMESTAMP defaults) identical to
- * the computer running this app, so dashboard "today", durations and peak hour
- * match the times shown at the kiosk.
- */
-pool.on("connection", (conn) => {
-  conn.query(`SET time_zone = '${localOffset()}'`, () => {});
-});
+/** True when the .env file carries enough details to even attempt a connection. */
+export function hasDbConfig() {
+  return Boolean(process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME);
+}
+
+let livePool = null;
+
+function buildPool() {
+  const cfg = dbConfig();
+  const created = mysql.createPool({
+    ...cfg,
+    waitForConnections: true,
+    connectionLimit: 10,
+    connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 10000),
+    dateStrings: true,
+    timezone: "local",
+  });
+  /**
+   * Keep MySQL's clock (NOW(), CURDATE(), CURRENT_TIMESTAMP defaults) identical to
+   * the computer running this app, so dashboard "today", durations and peak hour
+   * match the times shown at the kiosk.
+   */
+  created.on("connection", (conn) => {
+    conn.query(`SET time_zone = '${localOffset()}'`, () => {});
+  });
+  return created;
+}
+
+/** The live pool; created on first use so the app can boot without a database. */
+export function getPool() {
+  if (!livePool) livePool = buildPool();
+  return livePool;
+}
+
+/** Throw away the pool so the next query uses freshly saved credentials. */
+export function resetPool() {
+  const old = livePool;
+  livePool = null;
+  if (old) old.end().catch(() => {});
+}
+
+/** Stable handle used across the app; always talks to the current pool. */
+export const pool = {
+  query: (...args) => getPool().query(...args),
+  execute: (...args) => getPool().execute(...args),
+  getConnection: (...args) => getPool().getConnection(...args),
+  end: (...args) => getPool().end(...args),
+};
+
 
 
 /** Run a query and return rows. */
@@ -71,10 +112,10 @@ export async function ensureSchemaExtras() {
   const { readFile } = await import("node:fs/promises");
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
-  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const dir = moduleDir(import.meta.url);
 
   // Platform (owner) tables + Master Setting (sublibrary access) tables.
-  for (const file of ["platform.sql", "access.sql", "display.sql", "kiosk-sessions.sql", "access-control.sql"]) {
+  for (const file of ["platform.sql", "access.sql", "display.sql", "kiosk-sessions.sql", "access-control.sql", "tickets.sql", "api.sql"]) {
     const sql = await readFile(path.join(dir, "..", "db", file), "utf8");
     for (const stmt of sql.split(/;\s*\n/)) {
       // Drop comment lines so a leading comment block never hides the statement.
@@ -132,29 +173,43 @@ export async function ensureSchemaExtras() {
     INDEX (code_hash)
   )`);
 
-  // Align helper-table collations with the core `institutes` table. Servers with
-  // different MySQL defaults (utf8mb4_unicode_ci vs utf8mb4_uca1400_ai_ci) would
-  // otherwise fail JOINs with "Illegal mix of collations".
+  // Align EVERY table's collation with the core `institutes` table. Servers with
+  // different MySQL defaults (utf8mb4_unicode_ci vs utf8mb4_0900_ai_ci) would
+  // otherwise fail JOINs with "Illegal mix of collations" — this bit the tickets
+  // page when some tables were created under a different server default.
   const baseCollation = await one(
     `SELECT table_collation AS c FROM information_schema.tables
       WHERE table_schema = DATABASE() AND table_name = 'institutes'`,
   );
   if (baseCollation?.c) {
     const charset = String(baseCollation.c).split("_")[0];
-    for (const t of ["user_preferences", "estimates", "login_otps"]) {
-      const row = await one(
-        `SELECT table_collation AS c FROM information_schema.tables
-          WHERE table_schema = DATABASE() AND table_name = ?`,
-        [t],
-      );
-      if (row && row.c !== baseCollation.c) {
-        await pool.query(`ALTER TABLE \`${t}\` CONVERT TO CHARACTER SET ${charset} COLLATE ${baseCollation.c}`);
-      }
+    const [tables] = await pool.query(
+      `SELECT table_name AS t, table_collation AS c FROM information_schema.tables
+        WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'`,
+    );
+    for (const row of tables) {
+      if (!row.c || row.c === baseCollation.c) continue;
+      const name = String(row.t).replace(/`/g, "");
+      await pool.query(`ALTER TABLE \`${name}\` CONVERT TO CHARACTER SET ${charset} COLLATE ${baseCollation.c}`);
     }
   }
 
   const extras = [
     // Google Authenticator (TOTP) two-factor, optional per login.
+    // Presence: powers the "owner is online / last active" badge on tickets.
+    ["users", "last_seen_at", "DATETIME NULL"],
+    ["users", "last_login_at", "DATETIME NULL"],
+    ["users", "last_logout_at", "DATETIME NULL"],
+    // Support ticketing & chat.
+    ["tickets", "ticket_no", "VARCHAR(24) NULL"],
+    ["tickets", "accepted_at", "DATETIME NULL"],
+    ["tickets", "accepted_by", "VARCHAR(190) NULL"],
+    ["tickets", "acceptance_type", "ENUM('MANUAL','AUTO_5_DAYS') NULL"],
+    ["tickets", "last_message_at", "DATETIME NULL"],
+    ["ticket_attachments", "message_id", "CHAR(36) NULL"],
+    ["ticket_attachments", "file_path", "VARCHAR(400) NULL"],
+    ["ticket_events", "old_status", "VARCHAR(40) NULL"],
+    ["ticket_events", "new_status", "VARCHAR(40) NULL"],
     ["users", "totp_enabled", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["users", "totp_secret", "TEXT NULL"],
     ["users", "totp_pending", "TEXT NULL"],

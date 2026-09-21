@@ -40,7 +40,18 @@ router.post("/", async (req, res) => {
   await q("INSERT INTO institute_secrets (institute_id, kiosk_key) VALUES (?, ?)", [id, kioskKey()]);
   await q("INSERT INTO kiosk_settings (institute_id, institution_name) VALUES (?, ?)", [id, name]);
   await logAudit(req, id, "institute.create", "institutes", id, { name, slug });
-  res.status(201).json(await one("SELECT * FROM institutes WHERE id = ?", [id]));
+
+  // Optional: the owner runs this university themselves. The same account
+  // simply gains the university-admin role, so one email and one password
+  // open both panels and a password change always applies to both.
+  let selfLinked = false;
+  if (req.body?.self_link) {
+    await q("INSERT IGNORE INTO user_roles (id, user_id, institute_id, role) VALUES (?, ?, ?, 'super_admin')",
+      [uuid(), req.user.id, id]);
+    await logAudit(req, id, "institute.self_link", "users", req.user.id, { email: req.user.email });
+    selfLinked = true;
+  }
+  res.status(201).json({ ...(await one("SELECT * FROM institutes WHERE id = ?", [id])), self_linked: selfLinked });
 });
 
 router.patch("/:id", async (req, res) => {
@@ -73,6 +84,21 @@ router.post("/:id/rotate-key", async (req, res) => {
   );
   await logAudit(req, req.params.id, "institute.rotate_key", "institute_secrets", req.params.id, null);
   res.json({ kiosk_key: key });
+});
+
+/** Owner links (or unlinks) their own login as this university's admin. */
+router.post("/:id/self-link", async (req, res) => {
+  const inst = await one("SELECT id, name FROM institutes WHERE id = ?", [req.params.id]);
+  if (!inst) return res.status(404).json({ error: "University not found" });
+  const on = req.body?.linked !== false;
+  if (on) {
+    await q("INSERT IGNORE INTO user_roles (id, user_id, institute_id, role) VALUES (?, ?, ?, 'super_admin')",
+      [uuid(), req.user.id, inst.id]);
+  } else {
+    await q("DELETE FROM user_roles WHERE user_id = ? AND institute_id = ?", [req.user.id, inst.id]);
+  }
+  await logAudit(req, inst.id, on ? "institute.self_link" : "institute.self_unlink", "users", req.user.id, null);
+  res.json({ linked: on });
 });
 
 /** University admin logins issued by the owner. */

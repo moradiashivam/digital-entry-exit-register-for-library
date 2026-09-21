@@ -107,6 +107,7 @@ const camHint = (t) => { el("camHint").textContent = t; };
         const img = await fr.loadImage(m.photo_url);
         const found = await fr.describeFace(img, settings.face_model_url);
         if (!found) throw new Error("No face detected in the photo");
+        if (found.reason) throw new Error(`${found.reason} — use a clearer photo or a live capture`);
         await save(found, "photo");
         toast("Face enrolled");
       } catch (err) { toast(err.message || "Could not enrol this photo", true); }
@@ -174,11 +175,36 @@ async function save(found, source) {
     camHint("Reading the face…");
     faceFx?.verifying("Detecting face…");
     try {
-      const found = await fr.describeFace(el("camVideo"), settings.face_model_url);
-      if (!found) {
-        faceFx?.fail("No face detected — move closer");
-        return camHint("No face detected — move closer to the camera.");
+      // Several good captures, averaged, make a far more reliable template
+      // than one snapshot — this is the main fix for wrong matches.
+      const WANT = 5;
+      const samples = [];
+      let lastReason = "No face detected — move closer to the camera.";
+      for (let i = 0; i < 14 && samples.length < WANT; i += 1) {
+        const shot = await fr.describeFace(el("camVideo"), settings.face_model_url);
+        if (shot?.descriptor) {
+          samples.push(shot);
+          faceFx?.verifying(`Capturing… (${samples.length}/${WANT})`);
+          camHint(`Hold still — capturing ${samples.length} of ${WANT}.`);
+        } else if (shot?.reason) {
+          lastReason = shot.reason;
+          faceFx?.scanning(shot.reason);
+          camHint(shot.reason);
+        }
+        await new Promise((r) => setTimeout(r, 180));
       }
+      if (samples.length < 3) {
+        faceFx?.fail(lastReason);
+        return camHint(lastReason);
+      }
+      const descriptor = fr.averageDescriptors(samples.map((s) => s.descriptor));
+      // Refuse captures that disagree with each other (moving / changing face).
+      const spread = Math.max(...samples.map((s) => fr.distance(s.descriptor, descriptor)));
+      if (spread > 0.35) {
+        faceFx?.fail("Captures did not match — stay still and try again");
+        return camHint("The captures did not match each other — stay still, face the camera and try again.");
+      }
+      const found = { descriptor, score: samples.reduce((a, s) => a + s.score, 0) / samples.length };
       faceFx?.detected("Face detected");
       faceFx?.verifying("Enrolling face…");
       await save(found, "camera");

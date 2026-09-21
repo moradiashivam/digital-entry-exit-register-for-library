@@ -2,10 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = moduleDir(import.meta.url);
+import { DATA_ROOT, moduleDir } from "./runtime-paths.js";
 
 /** public/photos/<institute-folder>/<member_code>.jpg */
-export const PHOTO_ROOT = path.join(__dirname, "..", "public", "photos");
+export const PHOTO_ROOT = path.join(DATA_ROOT, "public", "photos");
 
 const safe = (v, fallback = "unknown") => {
   const s = String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");

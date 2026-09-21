@@ -16,10 +16,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { moduleDir } from "./runtime-paths.js";
 import { pool, q, one, uuid, localDateTime } from "./db.js";
 import { isNewer, storedVersion, recordInstalledVersion } from "./version.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = moduleDir(import.meta.url);
 
 /** Root of the running application (folder that holds package.json). */
 export const APP_ROOT = path.join(__dirname, "..");

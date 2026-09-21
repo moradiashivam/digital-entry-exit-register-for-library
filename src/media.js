@@ -4,10 +4,11 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { instituteFolder } from "./photos.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = moduleDir(import.meta.url);
+import { DATA_ROOT, moduleDir } from "./runtime-paths.js";
 
 /** public/uploads/<institute-folder>/<uuid>.<ext> — kiosk display media. */
-export const MEDIA_ROOT = path.join(__dirname, "..", "public", "uploads");
+export const MEDIA_ROOT = path.join(DATA_ROOT, "public", "uploads");
 
 const EXT = {
   "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/gif": "gif",

@@ -10,16 +10,21 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { APP_ROOT } from "./updater.js";
 
-const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
+// On Windows npm is a .cmd batch file, which cannot be launched directly by
+// execFile; run it through cmd.exe explicitly instead of relying on shell:true
+// (which trips Node's DEP0190 deprecation when passed an args array).
+const NPM_CMD = process.platform === "win32" ? "npm.cmd" : "npm";
 const MAX_BUFFER = 32 * 1024 * 1024;
 
 /** Run an npm command; npm uses non-zero exit codes for normal results, so we never throw on those. */
 function runNpm(args, { timeout = 10 * 60 * 1000 } = {}) {
+  const [cmd, cmdArgs] =
+    process.platform === "win32" ? ["cmd.exe", ["/c", "npm.cmd", ...args]] : [NPM_CMD, args];
   return new Promise((resolve) => {
     execFile(
-      NPM,
-      args,
-      { cwd: APP_ROOT, maxBuffer: MAX_BUFFER, timeout, windowsHide: true, shell: process.platform === "win32" },
+      cmd,
+      cmdArgs,
+      { cwd: APP_ROOT, maxBuffer: MAX_BUFFER, timeout, windowsHide: true },
       (error, stdout, stderr) => {
         resolve({
           code: error?.code ?? 0,

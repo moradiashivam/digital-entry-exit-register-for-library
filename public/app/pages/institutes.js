@@ -14,6 +14,11 @@ export async function renderInstitutes(view, { api, esc, toast }) {
         <div><label for="n_end">Subscription end</label><input id="n_end" type="date" value="${nextYear}" style="width:100%" /></div>
         <div><label for="n_email">Contact email</label><input id="n_email" type="email" style="width:100%" /></div>
       </div>
+      <label style="display:flex;gap:.5rem;align-items:center;margin-top:.8rem">
+        <input id="n_selflink" type="checkbox" style="width:auto" />
+        <span>Also make me this university's admin (same email and password as my owner login)</span>
+      </label>
+      <p class="muted" style="margin:.2rem 0 0">You will be asked which panel to open the next time you sign in.</p>
       <div class="row" style="justify-content:flex-end;margin-top:.9rem">
         <button id="create" class="btn-primary">Create university</button>
       </div>
@@ -31,6 +36,10 @@ export async function renderInstitutes(view, { api, esc, toast }) {
       <h3 id="dlgTitle">Admin logins</h3>
       <table><thead><tr><th>Email</th><th>Role</th><th>Last login</th><th></th></tr></thead>
         <tbody id="admins"></tbody></table>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-top:.8rem">
+        <span class="muted" id="selfLinkNote">Your own owner login is not an admin here.</span>
+        <button class="ghost btn-sm" id="selfLink">Link my login as admin</button>
+      </div>
       <h4 style="margin-top:1rem">Issue a new login</h4>
       <div class="grid cols-2">
         <div><label for="a_email">Email</label><input id="a_email" type="email" style="width:100%" /></div>
@@ -49,6 +58,9 @@ export async function renderInstitutes(view, { api, esc, toast }) {
     </dialog>`;
 
   const dlg = view.querySelector("#dlg");
+  const me = await api("/api/auth/me").catch(() => null);
+  const myEmail = String(me?.user?.email || me?.email || "").toLowerCase();
+  let linkedHere = false;
   const active = (r) => r.subscription_start <= today && r.subscription_end >= today;
 
   const load = async () => {
@@ -73,8 +85,29 @@ export async function renderInstitutes(view, { api, esc, toast }) {
     view.querySelector("#admins").innerHTML = admins.length
       ? admins.map((a) => `<tr><td>${esc(a.email)}</td><td>${esc(a.role)}</td>
           <td>${esc(a.last_login_at ? String(a.last_login_at).slice(0, 16) : "never")}</td>
-          <td class="col-actions"><button class="ghost btn-sm" data-reset="${esc(a.id)}">Reset password</button></td></tr>`).join("")
+          <td class="col-actions"><button class="ghost btn-sm" data-reset="${esc(a.id)}">Reset password</button>
+              <button class="ghost btn-sm" data-remove="${esc(a.id)}" data-email="${esc(a.email)}" style="color:var(--danger)">Delete</button></td></tr>`).join("")
       : `<tr><td colspan="4" class="muted">No logins issued yet.</td></tr>`;
+    linkedHere = admins.some((a) => String(a.email).toLowerCase() === myEmail);
+    view.querySelector("#selfLinkNote").textContent = linkedHere
+      ? "Your owner login is also an admin of this university."
+      : "Your own owner login is not an admin here.";
+    view.querySelector("#selfLink").textContent = linkedHere
+      ? "Remove my admin access"
+      : "Link my login as admin";
+  };
+
+  view.querySelector("#selfLink").onclick = async () => {
+    try {
+      await api(`/api/institutes/${adminFor.id}/self-link`, {
+        method: "POST",
+        body: { linked: !linkedHere },
+      });
+      toast(linkedHere ? "Your admin access was removed" : "Linked — sign in again to pick a panel");
+      await loadAdmins();
+    } catch (e) {
+      toast(e.message, true);
+    }
   };
 
   view.querySelector("#create").onclick = async () => {
@@ -87,11 +120,16 @@ export async function renderInstitutes(view, { api, esc, toast }) {
           subscription_start: view.querySelector("#n_start").value,
           subscription_end: view.querySelector("#n_end").value,
           contact_email: view.querySelector("#n_email").value || null,
+          self_link: view.querySelector("#n_selflink").checked,
         },
       });
+      const selfLinked = view.querySelector("#n_selflink").checked;
       view.querySelector("#n_name").value = "";
       view.querySelector("#n_slug").value = "";
-      toast("University created — now issue its admin login");
+      view.querySelector("#n_selflink").checked = false;
+      toast(selfLinked
+        ? "University created — you are its admin too; sign in again to pick a panel"
+        : "University created — now issue its admin login");
       await load();
     } catch (e) {
       toast(e.message, true);
@@ -153,14 +191,27 @@ export async function renderInstitutes(view, { api, esc, toast }) {
 
   view.querySelector("#admins").addEventListener("click", async (e) => {
     const reset = e.target.dataset.reset;
-    if (!reset) return;
-    const password = prompt("New password (8+ characters)");
-    if (!password) return;
-    try {
-      await api(`/api/institutes/${adminFor.id}/admins/${reset}/password`, { method: "POST", body: { password } });
-      toast("Password reset");
-    } catch (err) {
-      toast(err.message, true);
+    const remove = e.target.dataset.remove;
+    if (reset) {
+      const password = prompt("New password (8+ characters)");
+      if (!password) return;
+      try {
+        await api(`/api/institutes/${adminFor.id}/admins/${reset}/password`, { method: "POST", body: { password } });
+        toast("Password reset");
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+    if (remove) {
+      const email = e.target.dataset.email || "this login";
+      if (!confirm(`Delete the admin login ${email}? They will no longer be able to sign in to this university.`)) return;
+      try {
+        await api(`/api/institutes/${adminFor.id}/admins/${remove}`, { method: "DELETE" });
+        toast("Admin login deleted");
+        await loadAdmins();
+      } catch (err) {
+        toast(err.message, true);
+      }
     }
   });
 

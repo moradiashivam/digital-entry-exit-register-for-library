@@ -217,29 +217,55 @@ async function startFaceLoop(video) {
     return;
   }
 
+  // A single camera frame is never enough: the same person has to be the best
+  // match in several frames in a row before anything is written to the log.
+  const NEEDED = 3;
+  let votes = [];
+
   const loop = async () => {
     if (!faceRunning || !scanning) { fx.idle(); return; }
     try {
       const found = await fr.describeFace(video, faceData.model_url);
-      if (found) {
+      if (found && found.reason) {
+        votes = [];
+        camHint(found.reason);
+        fx.scanning(found.reason);
+      } else if (found && found.descriptor) {
         fx.detected("Face detected");
         const match = fr.bestMatch(found.descriptor, faceData.faces, faceData.threshold || 0.55);
         const now = Date.now();
         if (!match) {
+          votes = [];
           camHint("Face not recognised — try again or use your member code.");
           fx.fail("Face not recognised — try again");
-        } else if (match.member_id !== lastFaceMember || now - lastFaceAt > 6000) {
-          lastFaceMember = match.member_id;
-          lastFaceAt = now;
-          camHint(`Face matched (${match.confidence}%)`);
-          fx.verifying("Verifying identity…");
-          fx.success(`Verified ✓ ${match.confidence}%`);
-          setTimeout(() => { if (faceRunning && scanning) fx.scanning("Scanning face…"); }, 2200);
-          submitScan(match.member_id, "Face", match.confidence);
+        } else if (match.ambiguous) {
+          votes = [];
+          camHint("Could not tell you apart from another member — use your member code.");
+          fx.fail("Not sure who you are — try again");
+        } else {
+          if (votes[0] && votes[0].member_id !== match.member_id) votes = [];
+          votes.push(match);
+          if (votes.length < NEEDED) {
+            fx.verifying(`Verifying identity… (${votes.length}/${NEEDED})`);
+          } else {
+            // Average the confidence of the agreeing frames for the log.
+            const confidence = Math.round(votes.reduce((a, v) => a + v.confidence, 0) / votes.length);
+            votes = [];
+            if (match.member_id !== lastFaceMember || now - lastFaceAt > 6000) {
+              lastFaceMember = match.member_id;
+              lastFaceAt = now;
+              camHint(`Face matched (${confidence}%)`);
+              fx.success(`Verified ✓ ${confidence}%`);
+              setTimeout(() => { if (faceRunning && scanning) fx.scanning("Scanning face…"); }, 2200);
+              submitScan(match.member_id, "Face", confidence);
+            }
+          }
         }
+      } else {
+        votes = [];
       }
     } catch {}
-    setTimeout(() => requestAnimationFrame(loop), 500);
+    setTimeout(() => requestAnimationFrame(loop), 400);
   };
   requestAnimationFrame(loop);
 }

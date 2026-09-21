@@ -6,18 +6,19 @@ import { q, one, uuid } from "./db.js";
 import { encrypt, decrypt, sha256 } from "./crypto.js";
 import { sendMail, smtpConfigured } from "./mailer.js";
 
-const SECRET = process.env.JWT_SECRET || "dev-only-secret-change-me";
+// Read lazily: first-run setup writes the secret after this module loads.
+const secret = () => process.env.JWT_SECRET || "dev-only-secret-change-me";
 const ISSUER = process.env.APP_NAME || "Library Entry & Exit Register";
 const OTP_MINUTES = 10;
 
 /** Short-lived ticket issued after the password step, before the second factor. */
 export function signMfaTicket(user) {
-  return jwt.sign({ sub: user.id, mfa: true }, SECRET, { expiresIn: "10m" });
+  return jwt.sign({ sub: user.id, mfa: true }, secret(), { expiresIn: "10m" });
 }
 
 export function readMfaTicket(token) {
   try {
-    const payload = jwt.verify(String(token || ""), SECRET);
+    const payload = jwt.verify(String(token || ""), secret());
     return payload?.mfa ? payload.sub : null;
   } catch {
     return null;

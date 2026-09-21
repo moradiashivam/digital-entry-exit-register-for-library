@@ -20,6 +20,9 @@ import { renderOwnerSite } from "/app/pages/owner-site.js";
 import { renderOwnerSeo } from "/app/pages/owner-seo.js";
 import { renderOwnerUpdate } from "/app/pages/owner-update.js";
 import { renderOwnerDocs, renderAdminDocs } from "/app/pages/docs.js";
+import { renderTickets } from "/app/pages/tickets.js";
+import { renderApi } from "/app/pages/api.js";
+import { renderOwnerTickets } from "/app/pages/owner-tickets.js";
 import { mountThemeToggle, mountTextSize, initAppearance } from "/app/theme.js";
 import { navIcon } from "/app/icons.js";
 
@@ -54,6 +57,8 @@ const TENANT_PAGES = {
   mastersetting: { title: "Master setting", subtitle: "Sublibraries, sublibrary users, module and kiosk-wise permissions", render: renderMasterSetting },
   display: { title: "Library activities", subtitle: "Services, events and announcements shown on idle kiosk screens", render: renderKioskDisplay },
   settings: { title: "Kiosk settings", subtitle: "Branding and input methods for your kiosk", render: renderSettings },
+  tickets: { title: "Support tickets", subtitle: "Raise and track tickets with the main librarian and the platform owner", render: renderTickets },
+  api: { title: "API & developers", subtitle: "Issue API keys, watch usage and read the developer documentation", render: renderApi },
   docs: { title: "Documentation", subtitle: "Complete guide for university administrators", render: renderAdminDocs },
 };
 
@@ -69,6 +74,7 @@ const OWNER_PAGES = {
   seo: { title: "SEO", subtitle: "Rank the public site on Google, Bing and other search engines", render: renderOwnerSeo },
   application: { title: "Application management", subtitle: "Update the application, database upgrades, version and restart", render: renderOwnerUpdate },
   platform: { title: "System settings", subtitle: "Company, invoicing, email and audit trail", render: renderOwnerSettings },
+  tickets: { title: "Support tickets", subtitle: "Tickets raised by universities, with resolve or deny", render: renderOwnerTickets },
   docs: { title: "Documentation", subtitle: "Complete guide for the platform owner", render: renderOwnerDocs },
 };
 
@@ -84,6 +90,7 @@ const PAGE_MODULE = {
   settings: "kiosks",
   display: "kiosks",
   mastersetting: "master_setting",
+  api: "master_setting",
 };
 
 /** Hide pages the account is not allowed to open. */
@@ -94,7 +101,7 @@ function visiblePages() {
     const mod = PAGE_MODULE[key];
     if (!mod) { out[key] = page; continue; }
     if (!can(mod)) continue;
-    if (key === "mastersetting" && !isInstituteAdmin()) continue;
+    if ((key === "mastersetting" || key === "api") && !isInstituteAdmin()) continue;
     if (key === "import" && (!canBulk() || !canWrite())) continue;
     out[key] = page;
   }

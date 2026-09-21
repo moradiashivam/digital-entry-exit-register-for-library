@@ -1,0 +1,12 @@
+{
+  "name": "library-register",
+  "version": "1.0.0",
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "db/**/*",
+      "fonts/**/*",
+      ".env.example"
+    ]
+  }
+}

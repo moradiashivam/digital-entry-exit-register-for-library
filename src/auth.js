@@ -5,19 +5,29 @@ import { loadAccess, accessFor, WRITE_ROLES } from "./access.js";
 import { evaluateAccess, DENY_MESSAGE } from "./net-access.js";
 
 
-const SECRET = process.env.JWT_SECRET || "dev-only-secret-change-me";
-const HOURS = Number(process.env.JWT_HOURS || 12);
+// Read lazily: during first-run setup the secret is written to .env after
+// this module has already loaded.
+const secret = () => process.env.JWT_SECRET || "dev-only-secret-change-me";
+const hours = () => Number(process.env.JWT_HOURS || 12);
 
 export const hashPassword = (plain) => bcrypt.hash(plain, 10);
 export const verifyPassword = (plain, hash) => bcrypt.compare(plain, hash);
 
-export function signToken(user) {
+/**
+ * `mode` matters only for someone who is both the platform owner and a
+ * university admin with the same login: "admin" drops the owner powers for
+ * that session so the two panels stay properly separated.
+ */
+export function signToken(user, mode = "owner") {
   return jwt.sign(
-    { sub: user.id, email: user.email, owner: !!user.is_platform_owner },
-    SECRET,
-    { expiresIn: `${HOURS}h` },
+    { sub: user.id, email: user.email, owner: !!user.is_platform_owner, mode },
+    secret(),
+    { expiresIn: `${hours()}h` },
   );
 }
+
+/** Throttles the presence write so every API call does not hit the database. */
+const lastSeenCache = new Map();
 
 /** Loads the user + their roles from the bearer token. Does not reject. */
 export async function loadUser(req, _res, next) {
@@ -25,17 +35,26 @@ export async function loadUser(req, _res, next) {
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return next();
   try {
-    const payload = jwt.verify(token, SECRET);
+    const payload = jwt.verify(token, secret());
     const user = await one(
       "SELECT id, email, full_name, status, is_platform_owner FROM users WHERE id = ?",
       [payload.sub],
     );
     if (!user || user.status !== "Active") return next();
+    // Signed in to the university panel: owner powers are set aside.
+    user.panel = payload.mode === "admin" ? "admin" : "owner";
+    if (payload.mode === "admin") user.is_platform_owner = 0;
     user.roles = await q(
       "SELECT institute_id, role FROM user_roles WHERE user_id = ?",
       [user.id],
     );
     user.access = await loadAccess(user.id);
+    // Presence for the ticketing screens; written at most once a minute.
+    const seen = lastSeenCache.get(user.id) || 0;
+    if (Date.now() - seen > 60000) {
+      lastSeenCache.set(user.id, Date.now());
+      q("UPDATE users SET last_seen_at = NOW() WHERE id = ?", [user.id]).catch(() => {});
+    }
     req.user = user;
   } catch {
     /* invalid or expired token — treated as signed out */

@@ -5,6 +5,7 @@ import { patronInformation, maskId } from "../sip2.js";
 import { studentInsights, pickInsights, DEFAULT_CATEGORIES } from "../insights.service.js";
 import { activePostsFor } from "./display.routes.js";
 import { resolveSession, sessionState, isLive, logSessionEvent } from "../kiosk-session.js";
+import { stats as networkStats } from "../network-stats.js";
 
 const router = Router();
 
@@ -429,6 +430,16 @@ router.post("/contact", async (req, res) => {
     [uuid(), id, "note", `Website contact form enquiry from ${email}`, "website"],
   );
   res.status(201).json({ ok: true });
+});
+
+/** How many universities use the register across every installation. */
+router.get("/network-stats", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    res.json(await networkStats());
+  } catch {
+    res.json({ total: 0, installations: 0, self: 0, source: "unavailable" });
+  }
 });
 
 export default router;

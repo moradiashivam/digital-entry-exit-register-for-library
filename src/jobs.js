@@ -1,6 +1,8 @@
 import { q } from "./db.js";
 import { sendMail, smtpConfigured } from "./mailer.js";
 import { runGithubCheckJob } from "./github-update.js";
+import { runTicketAutoAcceptJob } from "./tickets.service.js";
+import { report as reportNetworkStats, REPORT_INTERVAL_MS as NETWORK_REPORT_MS } from "./network-stats.js";
 
 const RETRY_MS = 30 * 1000;
 
@@ -219,6 +221,22 @@ export function startScheduler() {
       .catch((e) => console.error("  auto-exit job failed:", e.message));
   setTimeout(autoExit, 8000);
   setInterval(autoExit, 5 * 60 * 1000).unref?.();
+
+  // Report this installation's university count to the shared public counter.
+  const networkPing = () =>
+    whenDatabaseReady(reportNetworkStats)
+      .then((r) => r && console.log(`  network counter: ${r.self} here, ${r.total} across the network (${r.source})`))
+      .catch((e) => console.error("  network counter failed:", e.message));
+  setTimeout(networkPing, 15000);
+  setInterval(networkPing, NETWORK_REPORT_MS).unref?.();
+
+  // Tickets left unanswered by their creator are accepted after five days.
+  const ticketSweep = () =>
+    whenDatabaseReady(runTicketAutoAcceptJob)
+      .then((r) => r?.accepted && console.log(`  tickets: auto-accepted ${r.accepted}`))
+      .catch((e) => console.error("  ticket auto-accept failed:", e.message));
+  setTimeout(ticketSweep, 10000);
+  setInterval(ticketSweep, 60 * 60 * 1000).unref?.();
 
   // Daily GitHub release check (the helper itself only calls GitHub once a day).
   const releaseCheck = () =>

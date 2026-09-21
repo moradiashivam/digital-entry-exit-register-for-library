@@ -9,9 +9,11 @@
     "setup": "node scripts/setup-db.js",
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "exe": "esbuild src/server.js --bundle --platform=node --format=cjs --target=node20 --outfile=dist/bundle.cjs --log-level=warning && pkg dist/bundle.cjs --config pkg.config.json --targets node22-win-x64 --fallback-to-source --output dist/LibraryRegister.exe",
     "graph": "graphify extract . --code-only --no-viz --force && graphify cluster-only . --no-label",
     "graph:update": "graphify update . --no-cluster",
-    "graph:report": "graphify cluster-only . --no-label"
+    "graph:report": "graphify cluster-only . --no-label",
+    "deb": "bash scripts/build-deb.sh"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -27,5 +29,17 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "db/**/*",
+      "fonts/**/*",
+      ".env.example"
+    ]
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.22.0",
+    "esbuild": "^0.28.2"
   }
 }

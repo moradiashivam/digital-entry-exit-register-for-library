@@ -75,6 +75,48 @@ function checkCaptcha(id, text) {
 }
 
 
+/**
+ * One person can own the platform AND run a university with the same login.
+ * In that case we hand back both sessions and let them pick a panel.
+ */
+async function loginResult(user) {
+  const base = { id: user.id, email: user.email, full_name: user.full_name };
+  const roles = user.is_platform_owner
+    ? await q("SELECT institute_id FROM user_roles WHERE user_id = ? AND institute_id IS NOT NULL", [user.id])
+    : [];
+  if (user.is_platform_owner && roles.length) {
+    // The universities this login administers — the sign-in page offers a
+    // dropdown to pick one when there is more than one.
+    const universities = await q(
+      `SELECT id, name FROM institutes WHERE id IN (${roles.map(() => "?").join(",")}) ORDER BY name`,
+      roles.map((r) => r.institute_id),
+    );
+    return {
+      chooseModule: true,
+      user: { ...base, is_platform_owner: true },
+      modules: [
+        {
+          key: "owner",
+          label: "Owner Panel",
+          description: "Universities, subscriptions, payments and platform settings",
+          token: signToken(user, "owner"),
+        },
+        {
+          key: "admin",
+          label: "University Admin Panel",
+          description: "Members, kiosks, reports and library settings",
+          token: signToken(user, "admin"),
+          universities,
+        },
+      ],
+    };
+  }
+  return {
+    token: signToken(user, "owner"),
+    user: { ...base, is_platform_owner: !!user.is_platform_owner },
+  };
+}
+
 router.post("/login", async (req, res) => {
   const email = String(req.body?.email || "").trim().toLowerCase();
   const password = String(req.body?.password || "");
@@ -114,10 +156,7 @@ router.post("/login", async (req, res) => {
     });
   }
   await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
-  res.json({
-    token: signToken(user),
-    user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
-  });
+  res.json(await loginResult(user));
 });
 
 const maskEmail = (email) => {
@@ -150,10 +189,7 @@ router.post("/login/verify", async (req, res) => {
     (req.body?.method !== "email" && (await verifyEmailOtp(user.id, code)));
   if (!ok) return res.status(401).json({ error: "That code is not correct or has expired" });
   await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
-  res.json({
-    token: signToken(user),
-    user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
-  });
+  res.json(await loginResult(user));
 });
 
 /** Step 2 (face) — verify the captured face descriptor against the enrolled one. */
@@ -168,10 +204,7 @@ router.post("/login/face", async (req, res) => {
     return res.status(401).json({ error: "Face did not match — try again or use another method" });
   }
   await q("UPDATE users SET last_login_at = NOW() WHERE id = ?", [user.id]);
-  res.json({
-    token: signToken(user),
-    user: { id: user.id, email: user.email, full_name: user.full_name, is_platform_owner: !!user.is_platform_owner },
-  });
+  res.json(await loginResult(user));
 });
 
 /** Step 2 (fallback) — email a one-time code instead of using the app. */
