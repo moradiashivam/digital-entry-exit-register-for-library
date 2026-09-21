@@ -154,9 +154,10 @@ export async function securityPanel(host, { api, esc, toast }) {
       o.scanning("Scanning face…");
       try {
         const found = await describeFace($("#fc_video"));
-        if (!found) {
-          o.fail("No face detected — move closer");
-          $("#fc_msg").textContent = "No clear face detected — move closer and try again.";
+        if (!found || !found.descriptor) {
+          const why = found?.reason || "No clear face detected — move closer and try again.";
+          o.fail(why);
+          $("#fc_msg").textContent = why;
           return;
         }
         o.detected("Face detected");

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>System health &amp; status — Library Entry &amp; Exit Register</title>
+  <meta name="description" content="Live status of the application, database connection, MySQL server and API service, so a university administrator can tell at a glance whether everything is working." />
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/site.css" />
+  <style>
+    .h-wrap { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+    .h-overall { display: flex; align-items: center; gap: 16px; padding: 22px; border-radius: 16px;
+      border: 1px solid var(--line); background: var(--panel-2); margin: 18px 0 22px; }
+    .h-overall h2 { margin: 0 0 4px; font-size: 22px; }
+    .h-overall p { margin: 0; }
+    .h-dot { width: 16px; height: 16px; border-radius: 50%; flex: 0 0 auto; }
+    .h-dot.big { width: 42px; height: 42px; }
+    .ok   { background: #16a34a; }
+    .warn { background: #d97706; }
+    .bad  { background: #dc2626; }
+    .wait { background: #94a3b8; }
+    .h-list { display: grid; gap: 12px; }
+    .h-row { display: flex; align-items: center; gap: 14px; padding: 16px 18px;
+      border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
+    .h-row .h-name { font-weight: 600; }
+    .h-row .h-detail { font-size: 14px; }
+    .h-pill { margin-left: auto; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); }
+    .h-pill.ok { background: rgba(22,163,74,.12); color: #15803d; border-color: rgba(22,163,74,.35); }
+    .h-pill.warn { background: rgba(217,119,6,.12); color: #b45309; border-color: rgba(217,119,6,.35); }
+    .h-pill.bad { background: rgba(220,38,38,.12); color: #b91c1c; border-color: rgba(220,38,38,.35); }
+    .h-pill.wait { background: transparent; }
+    .h-foot { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 20px; font-size: 14px; }
+    .h-foot button { cursor: pointer; }
+    @media (max-width: 560px) { .h-row { flex-wrap: wrap; } .h-pill { margin-left: 0; } }
+  </style>
+</head>
+<body class="site">
+  <header class="s-nav">
+    <div class="s-wrap">
+      <a class="s-logo" href="/"><span class="mark">LR</span><span data-site-brand>Library Entry &amp; Exit Register</span></a>
+      <nav class="s-links">
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+        <a href="/docs.html">Documentation</a>
+        <a href="/developer.html">Developer</a>
+        <a href="/health.html">Status</a>
+        <a href="/contact.html">Contact us</a>
+        <a class="s-btn" href="/login">Sign in</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="h-wrap">
+    <h1>System health</h1>
+    <p class="muted">Live status of the parts this application depends on. The page checks again every 15 seconds.</p>
+
+    <div class="h-overall">
+      <span id="overallDot" class="h-dot big wait"></span>
+      <div>
+        <h2 id="overallText">Checking…</h2>
+        <p class="muted" id="overallNote">Contacting the server.</p>
+      </div>
+    </div>
+
+    <div class="h-list" id="checks"></div>
+
+    <div class="h-foot">
+      <button class="s-btn" id="again" type="button">Check now</button>
+      <span class="muted" id="lastChecked">Last checked: —</span>
+      <span class="muted" id="version"></span>
+    </div>
+  </main>
+
+  <script type="module">
+    const CHECKS = [
+      ["application", "Application"],
+      ["database", "Database connection"],
+      ["mysql", "MySQL server"],
+      ["api", "API service"],
+    ];
+    const CLASS = { up: "ok", healthy: "ok", warning: "warn", down: "bad" };
+    const WORD = { up: "Healthy", healthy: "Healthy", warning: "Warning", down: "Down" };
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    const box = document.getElementById("checks");
+    const dot = document.getElementById("overallDot");
+
+    function paint(data) {
+      const rows = data.checks?.length
+        ? data.checks
+        : CHECKS.map(([key, label]) => ({ key, label, status: "down", detail: "No answer from the server." }));
+
+      box.innerHTML = rows.map((c) => `
+        <div class="h-row">
+          <span class="h-dot ${CLASS[c.status] || "wait"}"></span>
+          <div>
+            <div class="h-name">${esc(c.label)}</div>
+            <div class="h-detail muted">${esc(c.detail)}</div>
+          </div>
+          <span class="h-pill ${CLASS[c.status] || "wait"}">${WORD[c.status] || "Unknown"}</span>
+        </div>`).join("");
+
+      dot.className = `h-dot big ${CLASS[data.overall] || "bad"}`;
+      document.getElementById("overallText").textContent =
+        data.overall === "healthy" ? "All systems are working"
+          : data.overall === "warning" ? "Working, but something needs attention"
+            : "There is a problem";
+      document.getElementById("overallNote").textContent =
+        data.overall === "healthy" ? "The application, database and API are all responding normally."
+          : data.overall === "warning" ? "The application is usable, but one part is slow or not fully set up."
+            : "One part of the system is not responding — see the details below.";
+      document.getElementById("lastChecked").textContent = `Last checked: ${data.checked_at || new Date().toLocaleString()}`;
+      document.getElementById("version").textContent = data.version ? `· Version ${data.version}` : "";
+    }
+
+    async function check() {
+      try {
+        const res = await fetch("/api/health/status", { cache: "no-store" });
+        paint(await res.json());
+      } catch {
+        paint({
+          overall: "down",
+          checked_at: new Date().toLocaleString(),
+          checks: [
+            { key: "application", label: "Application", status: "down", detail: "The application server did not answer. It may be stopped." },
+            { key: "database", label: "Database connection", status: "down", detail: "Cannot be checked while the application is down." },
+            { key: "mysql", label: "MySQL server", status: "down", detail: "Cannot be checked while the application is down." },
+            { key: "api", label: "API service", status: "down", detail: "No response." },
+          ],
+        });
+      }
+    }
+
+    document.getElementById("again").onclick = check;
+    check();
+    setInterval(check, 15000);
+  </script>
+</body>
+</html>

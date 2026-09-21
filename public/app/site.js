@@ -45,7 +45,27 @@ export async function loadSite(page) {
     }
   }
   document.body.dataset.siteReady = "1";
+  loadNetworkCount();
   return site;
+}
+
+/**
+ * Live count of universities using the register across every installation.
+ * Left as a dash when the figure is unavailable, so the page never shows zero.
+ */
+async function loadNetworkCount() {
+  const slots = document.querySelectorAll("[data-site-count]");
+  if (!slots.length) return;
+  try {
+    const res = await fetch("/api/public/network-stats", { headers: { Accept: "application/json" } });
+    if (!res.ok) return;
+    const data = await res.json();
+    const total = Number(data.total) || 0;
+    if (!total) return;
+    for (const el of slots) el.textContent = `${total}+`;
+  } catch {
+    /* offline — the dash stays */
+  }
 }
 
 /** Pointer-driven 3D tilt for the hero stack (skipped on touch/small screens). */

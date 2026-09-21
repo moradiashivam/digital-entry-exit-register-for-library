@@ -6,6 +6,21 @@
   <title>Sign in — Library Entry &amp; Exit Register</title>
   <meta name="description" content="Sign in to manage members, kiosks and entry/exit reports for your university library." />
   <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .module-pick {
+      width: 100%;
+      text-align: left;
+      padding: .8rem .95rem;
+      border: 1px solid var(--line, #d1d5db);
+      border-radius: 12px;
+      background: var(--panel-2, #f8fafc);
+      color: inherit;
+      cursor: pointer;
+      transition: border-color .15s, transform .15s;
+    }
+    .module-pick:hover { border-color: var(--brand, #2563eb); transform: translateY(-1px); }
+    .module-pick strong { display: block; margin-bottom: .15rem; }
+  </style>
 </head>
 <body>
   <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
@@ -13,6 +28,20 @@
     <section class="panel login-card">
       <h1>Library Entry &amp; Exit Register</h1>
       <p class="muted">Sign in with the credentials issued by your platform owner.</p>
+
+      <div id="dbDown" hidden style="margin-top:.9rem;padding:.75rem .85rem;border-radius:12px;
+           border:1px solid var(--danger,#dc2626);background:var(--panel-2,#f8fafc)">
+        <strong style="color:var(--danger,#dc2626)">Database not connected</strong>
+        <p class="muted" id="dbDownMsg" style="margin:.3rem 0 .6rem">
+          The application cannot reach the database right now.
+        </p>
+        <p class="muted" style="margin:0 0 .6rem">
+          If the database password was changed, the owner can enter the new one here.
+        </p>
+        <button type="button" style="width:100%" onclick="location.href='/setup'">
+          Change database password
+        </button>
+      </div>
       <form id="form" style="margin-top:1rem">
         <label for="email">Email</label>
         <input id="email" type="email" autocomplete="username" required style="width:100%" />
@@ -52,6 +81,12 @@
         <p id="mfaError" class="muted" style="color:var(--danger)"></p>
         <p class="muted" style="margin-top:.4rem"><a href="/login.html">Start again</a></p>
       </form>
+      <div id="moduleBox" hidden style="margin-top:1rem">
+        <h2 style="font-size:1.05rem;margin:0 0 .3rem">Choose where to sign in</h2>
+        <p class="muted">This login works for two panels. Pick the one you need — you can sign out and switch any time.</p>
+        <div id="moduleList" style="display:grid;gap:.6rem;margin-top:.8rem"></div>
+      </div>
+
       <p class="muted" style="margin-top:1rem">Kiosk screen? Open <code>/kiosk/&lt;university-link&gt;</code>.</p>
 
     </section>
@@ -60,7 +95,78 @@
   <script type="module">
     import { api, setToken } from "/app/api.js";
 
-    if (localStorage.getItem("ler_token")) location.href = "/admin";
+    /** Database unreachable (for example its password was changed)? Offer the fix. */
+    let dbReady = true;
+    try {
+      const st = await (await fetch("/api/setup/status")).json();
+      dbReady = !!st.complete;
+      if (!dbReady) {
+        document.getElementById("dbDown").hidden = false;
+        document.getElementById("form").hidden = true;
+        if (st.message) document.getElementById("dbDownMsg").textContent = st.message;
+        else if (st.step !== "cannot-connect") {
+          document.getElementById("dbDownMsg").textContent =
+            "The application has not finished its first-time setup yet.";
+        }
+      }
+    } catch { /* keep the normal sign-in form */ }
+
+    if (dbReady && localStorage.getItem("ler_token")) location.href = "/admin";
+
+    /** Either sign straight in, or offer the Owner / University Admin panels. */
+    function finishLogin(out) {
+      if (!out.chooseModule) {
+        setToken(out.token);
+        location.href = "/admin";
+        return;
+      }
+      document.getElementById("form").hidden = true;
+      document.getElementById("mfaForm").hidden = true;
+      const box = document.getElementById("moduleBox");
+      const list = document.getElementById("moduleList");
+      list.innerHTML = "";
+
+      const escH = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      const enter = (m, instituteId) => {
+        setToken(m.token);
+        localStorage.setItem("ler_panel", m.key);
+        if (instituteId) localStorage.setItem("ler_institute", instituteId);
+        location.href = "/admin";
+      };
+
+      for (const m of out.modules) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "module-pick";
+        btn.innerHTML = `<strong>${m.label}</strong><br><span class="muted" style="font-weight:400">${m.description}</span>`;
+        const unis = m.universities || [];
+        if (unis.length > 1) {
+          // Admin of several universities: ask which one to open first.
+          btn.addEventListener("click", () => {
+            list.innerHTML = "";
+            const wrap = document.createElement("div");
+            wrap.className = "module-pick";
+            wrap.style.cursor = "default";
+            wrap.innerHTML = `<strong>${m.label}</strong><br>
+              <label for="uniPick" class="muted" style="font-weight:400">Select university</label>
+              <select id="uniPick" style="width:100%;margin:.4rem 0 .6rem">
+                ${unis.map((u) => `<option value="${escH(u.id)}">${escH(u.name)}</option>`).join("")}
+              </select>
+              <div class="row" style="gap:.5rem">
+                <button type="button" id="uniGo" style="flex:1">Continue</button>
+                <button type="button" class="ghost" id="uniBack" style="flex:1">Back</button>
+              </div>`;
+            list.appendChild(wrap);
+            wrap.querySelector("#uniGo").addEventListener("click", () => enter(m, wrap.querySelector("#uniPick").value));
+            wrap.querySelector("#uniBack").addEventListener("click", () => finishLogin(out));
+          });
+        } else {
+          btn.addEventListener("click", () => enter(m, unis[0]?.id));
+        }
+        list.appendChild(btn);
+      }
+      box.hidden = false;
+    }
 
     const form = document.getElementById("form");
     const error = document.getElementById("error");
@@ -103,8 +209,7 @@
           setupMethods();
           return;
         }
-        setToken(out.token);
-        location.href = "/admin";
+        finishLogin(out);
       } catch (err) {
         error.textContent = err.message;
         loadCaptcha(); // captcha is one-time use — always refresh after a failure
@@ -192,7 +297,11 @@
       try {
         const { describeFace } = await import("/app/face-engine.js");
         const found = await describeFace(el("faceVideo"));
-        if (!found) { fx.fail("No face detected — move closer"); throw new Error("No clear face detected — move closer and try again."); }
+        if (!found || !found.descriptor) {
+          const why = found?.reason || "No clear face detected — move closer and try again.";
+          fx.fail(why);
+          throw new Error(why);
+        }
         fx.detected("Face detected");
         fx.verifying("Verifying identity…");
         const out = await api("/api/auth/login/face", {
@@ -200,8 +309,7 @@
           body: { mfaToken, descriptor: found.descriptor },
         });
         fx.success("Authenticated ✓");
-        setToken(out.token);
-        setTimeout(() => { stopFace(); location.href = "/admin"; }, 900);
+        setTimeout(() => { stopFace(); finishLogin(out); }, 900);
       } catch (err) {
         if (fx.el && !fx.el.classList.contains("is-fail")) fx.fail("Face not recognised — try again");
         mfaError.textContent = err.message;
@@ -221,8 +329,7 @@
           method: "POST",
           body: { mfaToken, code: document.getElementById("mfaCode").value },
         });
-        setToken(out.token);
-        location.href = "/admin";
+        finishLogin(out);
       } catch (err) {
         mfaError.textContent = err.message;
       } finally {

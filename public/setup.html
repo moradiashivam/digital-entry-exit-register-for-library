@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Setup — Library Entry &amp; Exit Register</title>
+  <meta name="robots" content="noindex" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .wz-steps { display:flex; gap:.5rem; margin:.2rem 0 1rem; flex-wrap:wrap }
+    .wz-step { flex:1; min-width:120px; padding:.45rem .6rem; border-radius:10px;
+      border:1px solid var(--line,#e2e8f0); font-size:.85rem; opacity:.6 }
+    .wz-step.is-on { opacity:1; border-color:var(--brand,#2563eb); font-weight:600 }
+    .wz-step.is-done { opacity:1 }
+    .wz-grid { display:grid; grid-template-columns:1fr 1fr; gap:.75rem }
+    .wz-grid .full { grid-column:1 / -1 }
+    .wz-note { padding:.6rem .7rem; border-radius:10px; background:var(--panel-2,#f1f5f9); font-size:.9rem }
+    .wz-err { color:var(--danger,#dc2626); white-space:pre-wrap }
+    .wz-ok { color:#15803d }
+    label { display:block; margin-top:.55rem }
+    input, select { width:100% }
+    @media (max-width:640px){ .wz-grid { grid-template-columns:1fr } }
+  </style>
+</head>
+<body>
+  <script>document.body.classList.toggle("light", localStorage.getItem("ler_theme") !== "dark");</script>
+  <main class="login-wrap">
+    <section class="panel login-card" style="max-width:640px">
+      <h1 id="title">Application setup</h1>
+      <p class="muted" id="intro">Let’s connect this application to your MySQL database.</p>
+
+      <div class="wz-note wz-err" id="repairNote" hidden style="margin-bottom:1rem">
+        <strong>The application cannot reach the database.</strong><br />
+        If the database password was changed, type the new password below and press
+        “Save &amp; reconnect”. Nothing else is lost — your data stays exactly as it is.
+      </div>
+
+      <div class="wz-steps" id="wzSteps">
+        <div class="wz-step" data-step="db">1 · Database</div>
+        <div class="wz-step" data-step="owner">2 · Owner account</div>
+        <div class="wz-step" data-step="done">3 · Finish</div>
+      </div>
+
+      <!-- Step 1: database details -->
+      <form id="dbForm">
+        <div class="wz-grid">
+          <div>
+            <label for="host">Host</label>
+            <input id="host" value="127.0.0.1" required />
+          </div>
+          <div>
+            <label for="port">Port</label>
+            <input id="port" type="number" value="3306" required />
+          </div>
+          <div>
+            <label for="user">Username</label>
+            <input id="user" value="root" autocomplete="off" required />
+          </div>
+          <div>
+            <label for="password">Password</label>
+            <input id="password" type="password" autocomplete="new-password" />
+          </div>
+          <div class="full">
+            <label for="database">Database name</label>
+            <input id="database" value="library_register" required />
+            <p class="muted" style="margin:.3rem 0 0">Created automatically if it does not exist yet.</p>
+          </div>
+          <div class="full">
+            <label style="display:flex;gap:.5rem;align-items:center;margin-top:.2rem">
+              <input id="ssl" type="checkbox" style="width:auto" /> Connect using SSL
+            </label>
+          </div>
+        </div>
+        <div class="row" style="gap:.5rem;margin-top:1rem">
+          <button type="button" class="ghost" id="testBtn" style="flex:1">Test connection</button>
+          <button type="submit" id="saveBtn" style="flex:1">Save &amp; create tables</button>
+        </div>
+        <p id="dbMsg" class="muted"></p>
+      </form>
+
+      <!-- Step 2: owner account -->
+      <form id="ownerForm" hidden>
+        <p class="wz-note">Tables are ready. Now create the owner account you will sign in with.</p>
+        <label for="oname">Full name</label>
+        <input id="oname" placeholder="Platform Owner" />
+        <label for="oemail">Email</label>
+        <input id="oemail" type="email" autocomplete="username" required />
+        <label for="opass">Password</label>
+        <input id="opass" type="password" autocomplete="new-password" minlength="8" required />
+        <label for="opass2">Confirm password</label>
+        <input id="opass2" type="password" autocomplete="new-password" minlength="8" required />
+        <button type="submit" style="width:100%;margin-top:1rem" id="ownerBtn">Create owner account</button>
+        <p id="ownerMsg" class="muted"></p>
+      </form>
+
+      <!-- Step 3: done -->
+      <div id="doneBox" hidden>
+        <p class="wz-note wz-ok">Setup finished. Your database is connected and the owner account is ready.</p>
+        <button type="button" style="margin-top:.8rem" onclick="location.href='/login'">Go to sign in</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const steps = [...document.querySelectorAll(".wz-step")];
+
+    function show(step) {
+      $("dbForm").hidden = step !== "db";
+      $("ownerForm").hidden = step !== "owner";
+      $("doneBox").hidden = step !== "done";
+      const order = ["db", "owner", "done"];
+      steps.forEach((el) => {
+        const i = order.indexOf(el.dataset.step);
+        el.classList.toggle("is-on", el.dataset.step === step);
+        el.classList.toggle("is-done", i < order.indexOf(step));
+      });
+    }
+
+    async function post(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let data = {};
+      try { data = await res.json(); } catch { /* empty body */ }
+      if (!res.ok) throw new Error(data.error || "Something went wrong — please try again.");
+      return data;
+    }
+
+    const cfg = () => ({
+      host: $("host").value.trim(),
+      port: Number($("port").value),
+      user: $("user").value.trim(),
+      password: $("password").value,
+      database: $("database").value.trim(),
+      ssl: $("ssl").checked,
+    });
+
+    const msg = (el, text, bad) => {
+      el.textContent = text;
+      el.className = bad ? "wz-err" : "muted";
+    };
+
+    /** Repair mode: details were saved before but no longer work (password changed). */
+    function repairMode(message) {
+      $("title").textContent = "Database connection";
+      $("intro").textContent = "Update the saved database details to get the application running again.";
+      $("repairNote").hidden = false;
+      $("wzSteps").hidden = true;
+      $("saveBtn").textContent = "Save & reconnect";
+      $("password").focus();
+      if (message) msg($("dbMsg"), message, true);
+    }
+
+    // Pre-fill from whatever is already configured, and skip finished steps.
+    (async () => {
+      try {
+        const st = await (await fetch("/api/setup/status")).json();
+        if (st.suggestion) {
+          $("host").value = st.suggestion.host || "127.0.0.1";
+          $("port").value = st.suggestion.port || 3306;
+          $("user").value = st.suggestion.user || "root";
+          $("database").value = st.suggestion.database || "library_register";
+        }
+        if (st.complete) { location.href = "/login"; return; }
+        show("db");
+        if (st.step === "no-owner") { show("owner"); return; }
+        if (st.step === "cannot-connect") repairMode(st.message);
+      } catch {
+        show("db");
+      }
+    })();
+
+    $("testBtn").addEventListener("click", async () => {
+      msg($("dbMsg"), "Testing connection…");
+      $("testBtn").disabled = true;
+      try {
+        const out = await post("/api/setup/test", cfg());
+        msg($("dbMsg"), out.databaseExists
+          ? "Connected. The database exists and will be used."
+          : "Connected. The database will be created for you.");
+      } catch (e) {
+        msg($("dbMsg"), `Could not connect — ${e.message}`, true);
+      } finally {
+        $("testBtn").disabled = false;
+      }
+    });
+
+    $("dbForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      msg($("dbMsg"), "Saving settings and creating tables — this can take a moment…");
+      $("saveBtn").disabled = true;
+      try {
+        const out = await post("/api/setup/save", cfg());
+        if (out.ownerExists) { show("done"); return; }
+        msg($("dbMsg"), "");
+        show("owner");
+      } catch (e2) {
+        msg($("dbMsg"), `Could not connect — ${e2.message}`, true);
+      } finally {
+        $("saveBtn").disabled = false;
+      }
+    });
+
+    $("ownerForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if ($("opass").value !== $("opass2").value) {
+        msg($("ownerMsg"), "The two passwords do not match.", true);
+        return;
+      }
+      msg($("ownerMsg"), "Creating the owner account…");
+      $("ownerBtn").disabled = true;
+      try {
+        await post("/api/setup/owner", {
+          name: $("oname").value,
+          email: $("oemail").value,
+          password: $("opass").value,
+        });
+        show("done");
+      } catch (e2) {
+        msg($("ownerMsg"), e2.message, true);
+      } finally {
+        $("ownerBtn").disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
